@@ -301,7 +301,7 @@ func _make_chant_bgm() -> AudioStreamWAV:
 				sample += 0.5 * sin(TAU * f * 1.005 * ph)  # 轻微失谐 = 合唱/人群感
 				sample += 0.4 * sin(TAU * f * 0.5 * ph)    # 低八度增厚
 				sample = sample * env * 0.16
-			sample += (randf() * 2.0 - 1.0) * 0.02         # 人群底噪（已减半）
+			sample += (randf() * 2.0 - 1.0) * 0.01         # 人群底噪（已减半）
 			var v := int(clampf(sample, -1.0, 1.0) * 32767.0)
 			data[idx * 2] = v & 0xFF
 			data[idx * 2 + 1] = (v >> 8) & 0xFF
@@ -874,7 +874,7 @@ func _draw_pitch() -> void:
 	# 助威字幕
 	for ch in chants:
 		var a: float = clampf(ch.life / 90.0, 0.0, 1.0)
-		draw_string(font, ch.pos, ch.text, HORIZONTAL_ALIGNMENT_CENTER, -1, 22, Color(1, 1, 1, a))
+		draw_string(font, ch.pos, ch.text, HORIZONTAL_ALIGNMENT_CENTER, -1, 33, Color(1, 1, 1, a))
 	# 跑道（外圈可走动草地，深色）
 	draw_rect(Rect2(0, 0, WORLD.x, WORLD.y), Color("#246627"))
 	# 球场草坪 + 条纹
@@ -1034,7 +1034,7 @@ func _build_ui() -> void:
 	ui.add_child(lbl_levels)
 
 	# 解说
-	lbl_comment = _mk_label("", 22, Color.WHITE)
+	lbl_comment = _mk_label("", 33, Color.WHITE)
 	lbl_comment.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	lbl_comment.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl_comment.position.y = 96
