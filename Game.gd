@@ -124,6 +124,7 @@ var roll_pressed := false
 var cam: Camera2D
 var ui: CanvasLayer
 var shutter_player: AudioStreamPlayer
+var bgm_player: AudioStreamPlayer
 var lbl_score: Label
 var lbl_info: Label
 var lbl_levels: Label
@@ -262,6 +263,64 @@ func _setup_audio() -> void:
 	shutter_player.volume_db = -4.0
 	shutter_player.max_polyphony = 5  # 连拍时允许叠加
 	add_child(shutter_player)
+	# 背景：魔性洗脑的球场欢呼/口号 BGM（循环）
+	bgm_player = AudioStreamPlayer.new()
+	bgm_player.stream = _make_chant_bgm()
+	bgm_player.volume_db = -11.0
+	add_child(bgm_player)
+
+# 程序化合成一段循环的球场口号动机（人群"oh-oh-oh"+底噪），魔性洗脑
+func _make_chant_bgm() -> AudioStreamWAV:
+	var rate := 22050
+	# (频率Hz, 时长秒)，0 = 休止。一段上头的弹跳口号 + 收尾
+	var melody := [
+		[392.00, 0.26], [392.00, 0.26], [440.00, 0.26], [392.00, 0.26],
+		[329.63, 0.26], [392.00, 0.26], [261.63, 0.42], [0.0, 0.20],
+		[392.00, 0.26], [440.00, 0.26], [523.25, 0.30], [440.00, 0.26],
+		[392.00, 0.26], [329.63, 0.26], [261.63, 0.42], [0.0, 0.28],
+	]
+	var total := 0.0
+	for seg in melody:
+		total += float(seg[1])
+	var n := int(total * rate)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	var idx := 0
+	for seg in melody:
+		var f: float = float(seg[0])
+		var seglen: int = int(float(seg[1]) * rate)
+		for j in range(seglen):
+			if idx >= n:
+				break
+			var sample := 0.0
+			if f > 0.0:
+				var tt := float(j) / float(seglen)
+				var env: float = sin(PI * tt)        # 拱形包络，像一声"oh"
+				var ph := float(j) / float(rate)
+				sample += sin(TAU * f * ph)
+				sample += 0.5 * sin(TAU * f * 1.005 * ph)  # 轻微失谐 = 合唱/人群感
+				sample += 0.4 * sin(TAU * f * 0.5 * ph)    # 低八度增厚
+				sample = sample * env * 0.16
+			sample += (randf() * 2.0 - 1.0) * 0.04         # 人群底噪
+			var v := int(clampf(sample, -1.0, 1.0) * 32767.0)
+			data[idx * 2] = v & 0xFF
+			data[idx * 2 + 1] = (v >> 8) & 0xFF
+			idx += 1
+	if idx * 2 < data.size():
+		data.resize(idx * 2)
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.stereo = false
+	wav.data = data
+	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	wav.loop_begin = 0
+	wav.loop_end = idx
+	return wav
+
+func _play_bgm() -> void:
+	if bgm_player != null and not bgm_player.playing and not GameConfig.DEBUG.mute_audio:
+		bgm_player.play()
 
 func _make_shutter_wav() -> AudioStreamWAV:
 	var rate := 22050
@@ -1270,6 +1329,7 @@ func _start_game() -> void:
 	panel_upgrade.visible = false
 	_update_levels()
 	state = St.PLAY
+	_play_bgm()  # 首次开始时启动循环 BGM（此时已有用户点击手势，可解锁网页音频）
 	_say(GameConfig.OPENING_LINE, Color.WHITE)
 
 func _game_over() -> void:
