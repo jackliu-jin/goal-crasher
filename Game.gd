@@ -1025,29 +1025,40 @@ func _place(c: Control, al: float, at: float, ar: float, ab: float, ol: float, o
 	c.offset_left = ol; c.offset_top = ot; c.offset_right = ore; c.offset_bottom = ob
 
 func _build_touch_controls() -> void:
+	# 控件尺寸按屏幕高度的比例计算（适配高分屏，避免在高 DPI 手机上变得很小）
+	var vh: float = get_viewport_rect().size.y
+	if vh <= 0: vh = 720.0
+	var joy_d: float = clampf(vh * 0.38, 220.0, 380.0)
+	var knob_d: float = joy_d * 0.46
+	var btn_d: float = clampf(vh * 0.27, 150.0, 280.0)
+	var edge: float = clampf(vh * 0.06, 28.0, 80.0)
+	var gap: float = edge * 0.7
+	var fsize: int = int(btn_d * 0.26)
+
 	# 虚拟摇杆（左下）
 	var joy := Control.new()
-	_place(joy, 0, 1, 0, 1, 30, -150, 150, -30)
+	_place(joy, 0, 1, 0, 1, edge, -(edge + joy_d), edge + joy_d, -edge)
 	joy.mouse_filter = Control.MOUSE_FILTER_STOP
 	ui.add_child(joy)
-	var joy_bg := _circle_panel(120, Color(1, 1, 1, 0.15))
+	var joy_bg := _circle_panel(joy_d, Color(1, 1, 1, 0.18))
 	joy.add_child(joy_bg)
-	var knob := _circle_panel(50, Color(1, 1, 1, 0.5))
-	knob.position = Vector2(35, 35)
+	var knob := _circle_panel(knob_d, Color(1, 1, 1, 0.55))
+	knob.position = (Vector2(joy_d, joy_d) - Vector2(knob_d, knob_d)) / 2.0
 	joy.add_child(knob)
 	joy.gui_input.connect(func(e): _joy_input(e, joy, knob))
 
-	# 冲刺 / 翻滚按钮（右下）
-	var sp := _circle_button("冲刺", Color(1, 0.31, 0.31, 0.5))
-	_place(sp, 1, 1, 1, 1, -190, -120, -110, -40)
+	# 翻滚（最右下角）
+	var rl := _circle_button("翻滚", Color(0.31, 0.59, 1, 0.55), fsize)
+	_place(rl, 1, 1, 1, 1, -(edge + btn_d), -(edge + btn_d), -edge, -edge)
+	ui.add_child(rl)
+	rl.button_down.connect(func(): roll_pressed = true)
+
+	# 冲刺（在翻滚左侧）
+	var sp := _circle_button("冲刺", Color(1, 0.31, 0.31, 0.55), fsize)
+	_place(sp, 1, 1, 1, 1, -(edge + btn_d * 2 + gap), -(edge + btn_d), -(edge + btn_d + gap), -edge)
 	ui.add_child(sp)
 	sp.button_down.connect(func(): sprint_held = true)
 	sp.button_up.connect(func(): sprint_held = false)
-
-	var rl := _circle_button("翻滚", Color(0.31, 0.59, 1, 0.5))
-	_place(rl, 1, 1, 1, 1, -100, -120, -20, -40)
-	ui.add_child(rl)
-	rl.button_down.connect(func(): roll_pressed = true)
 
 func _circle_panel(d: float, col: Color) -> Panel:
 	var p := Panel.new()
@@ -1060,40 +1071,43 @@ func _circle_panel(d: float, col: Color) -> Panel:
 	p.add_theme_stylebox_override("panel", sb)
 	return p
 
-func _circle_button(text: String, col: Color) -> Button:
+func _circle_button(text: String, col: Color, fsize: int = 20) -> Button:
 	var b := Button.new()
 	b.text = text
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = col
-	sb.set_corner_radius_all(40)
+	sb.set_corner_radius_all(300)  # 足够大→Godot 自动夹成半径=半边长，得到圆形
 	b.add_theme_stylebox_override("normal", sb)
 	b.add_theme_stylebox_override("hover", sb)
 	b.add_theme_stylebox_override("pressed", sb)
 	b.add_theme_color_override("font_color", Color.WHITE)
+	b.add_theme_font_size_override("font_size", fsize)
 	if font: b.add_theme_font_override("font", font)
 	return b
 
 func _joy_input(e: InputEvent, joy: Control, knob: Panel) -> void:
+	var center: Vector2 = joy.size / 2.0
+	var rest: Vector2 = (joy.size - knob.size) / 2.0   # 摇杆中心位（随尺寸自适应）
+	var max_r: float = joy.size.x * 0.34
 	var active := false
 	var local := Vector2.ZERO
 	if e is InputEventScreenTouch:
 		if not e.pressed:
-			joy_vec = Vector2.ZERO; knob.position = Vector2(35, 35); return
-		local = e.position - joy.size / 2.0; active = true
+			joy_vec = Vector2.ZERO; knob.position = rest; return
+		local = e.position - center; active = true
 	elif e is InputEventScreenDrag:
-		local = e.position - joy.size / 2.0; active = true
+		local = e.position - center; active = true
 	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
 		if not e.pressed:
-			joy_vec = Vector2.ZERO; knob.position = Vector2(35, 35); return
-		local = e.position - joy.size / 2.0; active = true
+			joy_vec = Vector2.ZERO; knob.position = rest; return
+		local = e.position - center; active = true
 	elif e is InputEventMouseMotion and (e.button_mask & MOUSE_BUTTON_MASK_LEFT):
-		local = e.position - joy.size / 2.0; active = true
+		local = e.position - center; active = true
 	if active:
-		var r := 40.0
-		if local.length() > r:
-			local = local.normalized() * r
-		knob.position = Vector2(35, 35) + local
-		joy_vec = local / r
+		if local.length() > max_r:
+			local = local.normalized() * max_r
+		knob.position = rest + local
+		joy_vec = local / max_r
 
 # ----------------------------------------------------------------------------
 # 面板（开始 / 升级 / 结束）
