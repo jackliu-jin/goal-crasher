@@ -65,6 +65,8 @@ static func default_tune() -> Dictionary:
 		"security_accel": 0.05,
 		"security_accel_elite": 0.085,
 		"fb_accel": 0.10,
+		# —— 镜头 ——
+		"camera_zoom": 0.95,        # 相机缩放：值越大画面越大（越近）；0.72 偏远，1.0 为 1:1
 		# —— 速度 ——
 		"player_base_speed": 2.6,
 		"sprint_mult": 1.8,

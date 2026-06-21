@@ -14,7 +14,7 @@ var FX1 := WORLD.x - FIELD_MARGIN
 var FY1 := WORLD.y - FIELD_MARGIN
 var FW := FX1 - FX0
 var FH := FY1 - FY0
-const ZOOM := 0.72            # Camera2D 缩放（<1 = 拉远，看得更多）
+# 相机缩放改由 Config.gd 的 camera_zoom 控制（值越大画面越大）
 const STAND_DEPTH := 260.0
 
 # ----------------------------------------------------------------------------
@@ -232,7 +232,8 @@ func _build_crowd_dots() -> void:
 # ----------------------------------------------------------------------------
 func _setup_camera() -> void:
 	cam = Camera2D.new()
-	cam.zoom = Vector2(ZOOM, ZOOM)
+	var z: float = float(TUNE.camera_zoom)
+	cam.zoom = Vector2(z, z)
 	cam.position_smoothing_enabled = true
 	cam.position_smoothing_speed = 12.0
 	cam.position = WORLD / 2.0
