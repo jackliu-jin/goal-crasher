@@ -266,7 +266,7 @@ func _setup_audio() -> void:
 	# 背景：魔性洗脑的球场欢呼/口号 BGM（循环）
 	bgm_player = AudioStreamPlayer.new()
 	bgm_player.stream = _make_chant_bgm()
-	bgm_player.volume_db = -11.0
+	bgm_player.volume_db = -17.0  # 比之前 -11dB 再降约一半响度
 	add_child(bgm_player)
 
 # 程序化合成一段循环的球场口号动机（人群"oh-oh-oh"+底噪），魔性洗脑
@@ -674,7 +674,7 @@ func _update_security(dt: float) -> void:
 	sec_spawn_timer -= dt
 	var speed_bonus := int((upgrades.speed_mult - 1.0) * 8)
 	var target_count: int = int(TUNE.base_security) + int(elapsed / 15.0) + int(score / 1000.0) + speed_bonus + int(photographed / 6.0)
-	if security.size() < min(target_count, 32) and sec_spawn_timer <= 0:
+	if security.size() < min(target_count, int(TUNE.max_security)) and sec_spawn_timer <= 0:
 		_spawn_security(elapsed > 60 and randf() < 0.3)
 		sec_spawn_timer = max(30.0, 90.0 - floor(elapsed / 10.0) - floor(photographed / 4.0))
 
