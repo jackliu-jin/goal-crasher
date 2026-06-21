@@ -162,7 +162,7 @@ var font: Font
 # ============================================================================
 func _ready() -> void:
 	randomize()
-	font = ThemeDB.fallback_font
+	font = _load_cjk_font()
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_build_sprites()
 	_build_crowd_dots()
@@ -170,6 +170,19 @@ func _ready() -> void:
 	_setup_environment()
 	_build_ui()
 	set_process(true)
+
+# 加载内置的像素中文字体（Zpix），用最近邻无抗锯齿渲染以保持像素质感；缺失时回退默认字体
+func _load_cjk_font() -> Font:
+	if ResourceLoader.exists("res://font.ttf"):
+		var f = load("res://font.ttf")
+		if f is FontFile:
+			f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+			f.hinting = TextServer.HINTING_NONE
+			f.force_autohinter = false
+			return f
+		if f != null:
+			return f
+	return ThemeDB.fallback_font
 
 # ----------------------------------------------------------------------------
 # 像素精灵生成
@@ -859,6 +872,7 @@ func _mk_label(text: String, size: int, color: Color) -> Label:
 	l.add_theme_color_override("font_color", color)
 	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
 	l.add_theme_constant_override("outline_size", 4)
+	if font: l.add_theme_font_override("font", font)
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	l.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	return l
@@ -985,6 +999,7 @@ func _circle_button(text: String, col: Color) -> Button:
 	b.add_theme_stylebox_override("hover", sb)
 	b.add_theme_stylebox_override("pressed", sb)
 	b.add_theme_color_override("font_color", Color.WHITE)
+	if font: b.add_theme_font_override("font", font)
 	return b
 
 func _joy_input(e: InputEvent, joy: Control, knob: Panel) -> void:
@@ -1081,6 +1096,7 @@ func _menu_button(text: String) -> Button:
 	b.add_theme_stylebox_override("hover", sb2)
 	b.add_theme_stylebox_override("pressed", sb2)
 	b.add_theme_color_override("font_color", Color.WHITE)
+	if font: b.add_theme_font_override("font", font)
 	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	return b
 
