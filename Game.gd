@@ -699,6 +699,7 @@ func _trigger_riot() -> void:
 		riot_npcs.append({
 			"pos": Vector2(randf() * WORLD.x, randf() * WORLD.y), "vel": Vector2.ZERO,
 			"dir": Vector2(randf() - 0.5, randf() - 0.5).normalized(), "wander": 0.0,
+			"spd": 2.6 + randf() * 1.8,
 			"anim": "stand", "phase": 0.0,
 		})
 
@@ -707,11 +708,17 @@ func _update_riot(dt: float) -> void:
 	riot_timer -= dt
 	for r in riot_npcs:
 		r.wander -= dt
+		# 狂暴的观众：高频变向 + 随机变速，毫无规律地乱窜
 		if r.wander <= 0:
 			r.dir = Vector2(randf() - 0.5, randf() - 0.5).normalized()
-			r.wander = 30.0 + randf() * 60.0
-		r.pos = _clamp_world_v(r.pos + r.dir * 2.4 * dt, 10.0)
-		_step_anim(r, 2.4, dt)
+			r.wander = 6.0 + randf() * 18.0
+			r.spd = 2.4 + randf() * 2.4
+		# 额外的小抖动，让轨迹更癫
+		var jitter := Vector2(randf() - 0.5, randf() - 0.5) * 0.6
+		var move_dir: Vector2 = (r.dir + jitter).normalized()
+		r.pos = _clamp_world_v(r.pos + move_dir * float(r.spd) * dt, 10.0)
+		r.dir = move_dir
+		_step_anim(r, float(r.spd), dt)
 	if riot_timer <= 0:
 		riot_active = false
 		riot_npcs.clear()
@@ -835,18 +842,21 @@ func _draw_field_lines() -> void:
 	var cr: float = min(FW, FH) * 0.12
 	draw_arc(Vector2(cx, cy), cr, 0, TAU, 48, col, lw)
 	draw_circle(Vector2(cx, cy), 4, col)
-	var pd := FW * 0.13; var ph := FH * 0.55
-	var gd := FW * 0.045; var gh := FH * 0.28
-	var spot := FW * 0.085; var arc_r := FH * 0.10
+	var pd := FW * 0.15; var ph := FH * 0.55       # 大禁区
+	var gd := FW * 0.05; var gh := FH * 0.28        # 小禁区
+	var spot_d := FW * 0.10                          # 点球点距门线
+	var arc_r: float = min(FW, FH) * 0.12            # 罚球弧半径（与中圈同尺度）
 	for side in [{"gx": FX0, "s": 1.0}, {"gx": FX1, "s": -1.0}]:
 		var gx: float = side.gx; var s: float = side.s
 		draw_rect(Rect2(gx if s > 0 else gx - pd, cy - ph / 2, pd, ph), col, false, lw)
 		draw_rect(Rect2(gx if s > 0 else gx - gd, cy - gh / 2, gd, gh), col, false, lw)
-		var sp := Vector2(gx + s * spot, cy)
+		var sp := Vector2(gx + s * spot_d, cy)
 		draw_circle(sp, 4, col)
-		var a0 := -PI / 2.6 if s > 0 else PI - PI / 2.6
-		var a1 := PI / 2.6 if s > 0 else PI + PI / 2.6
-		draw_arc(sp, arc_r, a0, a1, 24, col, lw)
+		# 罚球弧：以点球点为圆心，只画禁区前沿线之外那一段（弧的端点正好落在禁区线上）
+		var arg: float = clampf((pd - spot_d) / arc_r, -1.0, 1.0)
+		var half: float = acos(arg)
+		var ca: float = 0.0 if s > 0 else PI       # 左门弧朝右(向场内)，右门弧朝左
+		draw_arc(sp, arc_r, ca - half, ca + half, 24, col, lw)
 		var goal_d := 24.0; var goal_h := FH * 0.13
 		draw_rect(Rect2(gx - goal_d if s > 0 else gx, cy - goal_h / 2, goal_d, goal_h), Color(1, 1, 1, 0.95), false, lw)
 	var ccr := 24.0
@@ -1249,7 +1259,7 @@ func _start_game() -> void:
 
 func _game_over() -> void:
 	state = St.OVER
-	lbl_over_title.text = GameConfig.ARREST_TITLE
+	lbl_over_title.text = GameConfig.ARREST_TITLE_TEMPLATE % security.size()
 	lbl_over_stats.text = "得分：%d\n合影人数：%d\n存活时间：%s" % [score, photographed, _fmt_time(elapsed)]
 	panel_over.visible = true
 

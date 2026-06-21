@@ -48,8 +48,8 @@ const STAR_PHOTO_LINES := [
 const MILESTONE_EVERY := 10
 const MILESTONE_TEMPLATE := "已合影 %d 人！你已经是全场最靓的仔！"
 
-# 被捕结算标题
-const ARREST_TITLE := "被保安逮捕了！"
+# 被捕结算标题（%d 会替换成被捕时场上保安数量）
+const ARREST_TITLE_TEMPLATE := "你被场上 %d 名保安逮捕了！"
 
 # 看台助威字幕
 const CHANT_TEXTS := ["OLE OLE!", "VAMOS!", "一起合影!", "MESSI!", "加油!", "CR7!","jajajajaja","OMG!","WTF!","我也想合影","我要下去了！","WATCH OUT!"]
