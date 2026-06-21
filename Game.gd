@@ -171,17 +171,22 @@ func _ready() -> void:
 	_build_ui()
 	set_process(true)
 
-# 加载内置的像素中文字体（Zpix），用最近邻无抗锯齿渲染以保持像素质感；缺失时回退默认字体
+# 加载内置的像素中文字体（Zpix）。直接读原始字节构建 FontFile，绕开 Godot 导入系统，
+# 确保打包进 web 构建（cjkfont.dat 由 export_presets 的 include_filter 强制包含）。
 func _load_cjk_font() -> Font:
-	if ResourceLoader.exists("res://font.ttf"):
-		var f = load("res://font.ttf")
-		if f is FontFile:
-			f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
-			f.hinting = TextServer.HINTING_NONE
-			f.force_autohinter = false
-			return f
-		if f != null:
-			return f
+	var path := "res://cjkfont.dat"
+	if FileAccess.file_exists(path):
+		var fa := FileAccess.open(path, FileAccess.READ)
+		if fa != null:
+			var bytes := fa.get_buffer(fa.get_length())
+			fa.close()
+			if bytes.size() > 1000:
+				var f := FontFile.new()
+				f.data = bytes
+				f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+				f.hinting = TextServer.HINTING_NONE
+				f.force_autohinter = false
+				return f
 	return ThemeDB.fallback_font
 
 # ----------------------------------------------------------------------------
