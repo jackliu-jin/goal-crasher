@@ -260,13 +260,13 @@ func _setup_environment() -> void:
 func _setup_audio() -> void:
 	shutter_player = AudioStreamPlayer.new()
 	shutter_player.stream = _make_shutter_wav()
-	shutter_player.volume_db = -4.0
+	shutter_player.volume_db = -10.0
 	shutter_player.max_polyphony = 5  # 连拍时允许叠加
 	add_child(shutter_player)
 	# 背景：魔性洗脑的球场欢呼/口号 BGM（循环）
 	bgm_player = AudioStreamPlayer.new()
 	bgm_player.stream = _make_chant_bgm()
-	bgm_player.volume_db = -17.0  # 比之前 -11dB 再降约一半响度
+	bgm_player.volume_db = -27.0  # 比之前 -11dB 再降约一半响度
 	add_child(bgm_player)
 
 # 程序化合成一段循环的球场口号动机（人群"oh-oh-oh"+底噪），魔性洗脑
@@ -301,7 +301,7 @@ func _make_chant_bgm() -> AudioStreamWAV:
 				sample += 0.5 * sin(TAU * f * 1.005 * ph)  # 轻微失谐 = 合唱/人群感
 				sample += 0.4 * sin(TAU * f * 0.5 * ph)    # 低八度增厚
 				sample = sample * env * 0.16
-			sample += (randf() * 2.0 - 1.0) * 0.04         # 人群底噪
+			sample += (randf() * 2.0 - 1.0) * 0.02         # 人群底噪（已减半）
 			var v := int(clampf(sample, -1.0, 1.0) * 32767.0)
 			data[idx * 2] = v & 0xFF
 			data[idx * 2 + 1] = (v >> 8) & 0xFF

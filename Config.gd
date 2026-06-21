@@ -62,7 +62,7 @@ static func default_tune() -> Dictionary:
 	return {
 		# —— 惯性（越大越灵敏，越小越笨重） ——
 		"player_accel": 0.22,
-		"security_accel": 0.05,
+		"security_accel": 0.03,
 		"security_accel_elite": 0.085,
 		"fb_accel": 0.10,
 		# —— 镜头 ——
@@ -80,7 +80,7 @@ static func default_tune() -> Dictionary:
 		# —— 保安 ——
 		"base_security": 5,         # 初始保安数量
 		"max_security": 42,         # 场上保安数量上限
-		"sec_separation_radius": 40.0,  # 保安互斥半径（避免重叠走同一条路）
+		"sec_separation_radius": 50.0,  # 保安互斥半径（避免重叠走同一条路）
 		"sec_separation_force": 0.9,    # 互斥强度
 		# —— 翻滚 ——
 		"roll_cost": 10.0,          # 翻滚体力消耗（之前 5，翻倍）
