@@ -309,7 +309,7 @@ func _wants_sprint() -> bool:
 func _update_player(dt: float) -> void:
 	var move := _move_vector()
 	var want_sprint := _wants_sprint() and move.length() > 0 and not p_exhausted and p_stamina > 0
-	var want_roll := roll_pressed and not p_rolling and p_roll_cd <= 0 and p_stamina >= upgrades.roll_cost
+	var want_roll: bool = roll_pressed and not p_rolling and p_roll_cd <= 0 and p_stamina >= upgrades.roll_cost
 	roll_pressed = false
 	if move.length() > 0: p_face = move
 
@@ -450,9 +450,9 @@ func _update_players(dt: float) -> void:
 		var smax: float = TUNE.star_stamina if fp.is_star else TUNE.common_stamina
 		if fp.stamina > smax: fp.stamina = smax
 		var base_speed: float = TUNE.star_speed if fp.is_star else TUNE.common_speed
-		var dist := fp.pos.distance_to(p_pos)
-		var grabbed := dist < photo_range * 0.8 and not p_rolling
-		var want_flee := not grabbed and not p_rolling and dist < fp.flee_radius and fp.stamina > 0 and not fp.exhausted
+		var dist: float = fp.pos.distance_to(p_pos)
+		var grabbed: bool = dist < photo_range * 0.8 and not p_rolling
+		var want_flee: bool = not grabbed and not p_rolling and dist < fp.flee_radius and fp.stamina > 0 and not fp.exhausted
 
 		var ddir := Vector2.ZERO
 		var dspeed := 0.0
@@ -495,7 +495,7 @@ func _update_players(dt: float) -> void:
 		if fp.chase_timer > 0: fp.chase_timer -= dt
 		else: fp.chased = false
 
-		var in_range := grabbed or (dist < photo_range and not fp.fleeing)
+		var in_range: bool = grabbed or (dist < photo_range and not fp.fleeing)
 		if in_range:
 			fp.being_photo = true
 			fp.progress += (1.3 if grabbed else 1.0) * dt
@@ -595,14 +595,14 @@ func _update_security(dt: float) -> void:
 				if nearest != null and nd < 260:
 					target = nearest.pos
 					chasing_decoy = true
-			var dir := (target - s.pos).normalized()
+			var dir: Vector2 = (target - s.pos).normalized()
 			if s.elite and not chasing_decoy:
 				dir = (p_pos + p_vel * 8.0 - s.pos).normalized()
 			var ratio: float = TUNE.sec_ratio_elite if s.elite else TUNE.sec_ratio
 			var accel: float = TUNE.security_accel_elite if s.elite else TUNE.security_accel
-			var target_vel := dir * pcur * ratio
+			var target_vel: Vector2 = dir * pcur * ratio
 			s.vel += (target_vel - s.vel) * accel * dt
-			var dpl := s.pos.distance_to(p_pos)
+			var dpl: float = s.pos.distance_to(p_pos)
 			if not chasing_decoy and not p_rolling and dpl < LUNGE_RANGE and s.lunge_cd <= 0:
 				s.state = "charge"
 				s.timer = LUNGE_CHARGE
@@ -758,7 +758,7 @@ func _draw_field_lines() -> void:
 	var cy := WORLD.y / 2.0
 	draw_rect(Rect2(FX0, FY0, FW, FH), col, false, lw)
 	draw_line(Vector2(cx, FY0), Vector2(cx, FY1), col, lw)
-	var cr := min(FW, FH) * 0.12
+	var cr: float = min(FW, FH) * 0.12
 	draw_arc(Vector2(cx, cy), cr, 0, TAU, 48, col, lw)
 	draw_circle(Vector2(cx, cy), 4, col)
 	var pd := FW * 0.13; var ph := FH * 0.55
