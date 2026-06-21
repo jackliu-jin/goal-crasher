@@ -1,0 +1,69 @@
+name: Build & Deploy Web
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 如果你的 Godot 不是 4.7-stable，改这一行即可（在 Godot 帮助→关于里看精确版本）。
+# 例如 4.7.1 就写 "4.7.1-stable"，4.4 就写 "4.4-stable"。
+env:
+  GODOT_VERSION: "4.7-stable"
+  EXPORT_PRESET: "Web"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Godot + export templates
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}"
+          curl -fL -o godot.zip "${BASE}/Godot_v${GODOT_VERSION}_linux.x86_64.zip"
+          curl -fL -o templates.tpz "${BASE}/Godot_v${GODOT_VERSION}_export_templates.tpz"
+          unzip -o godot.zip
+          mv "Godot_v${GODOT_VERSION}_linux.x86_64" /usr/local/bin/godot
+          chmod +x /usr/local/bin/godot
+          # 模板目录名要把 4.7-stable 变成 4.7.stable
+          VER_DIR="$(echo "${GODOT_VERSION}" | sed 's/-/./')"
+          mkdir -p "${HOME}/.local/share/godot/export_templates/${VER_DIR}"
+          unzip -o templates.tpz
+          mv templates/* "${HOME}/.local/share/godot/export_templates/${VER_DIR}/"
+          godot --headless --version || true
+
+      - name: Import resources
+        run: godot --headless --path . --import || true
+
+      - name: Export HTML5
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          godot --headless --path . --export-release "${EXPORT_PRESET}" build/index.html
+          ls -la build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

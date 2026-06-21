@@ -1,0 +1,1192 @@
+extends Node2D
+## Pitch Invader: World Cup Craze — Godot 4.x 版
+## 单脚本实现：世界绘制(_draw) + 逻辑(_process) + 代码构建 UI。
+## 像素风沿用，叠加 Godot 的相机缩放/震屏、辉光环境、粒子化纸屑等润色。
+
+# ----------------------------------------------------------------------------
+# 世界 / 几何
+# ----------------------------------------------------------------------------
+const WORLD := Vector2(2200, 1400)
+const FIELD_MARGIN := 110.0
+var FX0 := FIELD_MARGIN
+var FY0 := FIELD_MARGIN
+var FX1 := WORLD.x - FIELD_MARGIN
+var FY1 := WORLD.y - FIELD_MARGIN
+var FW := FX1 - FX0
+var FH := FY1 - FY0
+const ZOOM := 0.72            # Camera2D 缩放（<1 = 拉远，看得更多）
+const STAND_DEPTH := 260.0
+
+# ----------------------------------------------------------------------------
+# 可调参数（对应 JS 版 TUNE，便于后续平衡）
+# ----------------------------------------------------------------------------
+var TUNE := {
+	"player_accel": 0.22,
+	"security_accel": 0.045,
+	"security_accel_elite": 0.075,
+	"fb_accel": 0.10,
+	"player_base_speed": 2.6,
+	"sprint_mult": 1.8,
+	"sec_ratio": 0.62,
+	"sec_ratio_elite": 0.85,
+	"star_speed": 2.5,
+	"common_speed": 1.9,
+	"star_stamina": 170.0,
+	"common_stamina": 55.0,
+}
+
+# ----------------------------------------------------------------------------
+# 像素精灵模板（与 JS 版一致）
+# ----------------------------------------------------------------------------
+const BODY := [
+	"  hhhh  ",
+	" hkkkkh ",
+	" hkkkkh ",
+	" kkkkkk ",
+	"  kkkk  ",
+	"  1111  ",
+	" 111111 ",
+	" 111111 ",
+]
+const LEGS_STAND := ["  1  1  ", "  2  2  ", "  2  2  ", "  bb bb "]
+const LEGS_A := [" 1   1  ", " 2   2  ", " 2    2 ", " bb   bb"]
+const LEGS_B := ["  1   1 ", "  2   2 ", " 2    2 ", "bb   bb "]
+
+var SPRITES := {}   # name -> {"stand":tex,"a":tex,"b":tex}
+const ANIM_STRIDE := 8.0
+
+# ----------------------------------------------------------------------------
+# 游戏状态
+# ----------------------------------------------------------------------------
+enum St { MENU, PLAY, UPGRADE, OVER }
+var state: int = St.MENU
+
+var score := 0
+var elapsed := 0.0           # 帧数（dt≈1/帧）
+var photographed := 0
+var next_upgrade_at := 1000
+var god_mode := false
+
+# 玩家
+var p_pos := Vector2.ZERO
+var p_vel := Vector2.ZERO
+var p_radius := 14.0
+var p_face := Vector2(0, -1)
+var p_stamina := 100.0
+var p_stamina_max := 100.0
+var p_exhausted := false
+var p_exhaust_timer := 0.0
+var p_rolling := false
+var p_roll_timer := 0.0
+var p_roll_dir := Vector2(1, 0)
+var p_roll_cd := 0.0
+var p_combo := 0
+var p_combo_timer := 0.0
+var p_riot := 0.0
+var p_anim := "stand"
+var p_phase := 0.0
+
+var upgrades := {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": 5.0, "photo_radius": 1.0}
+var up_levels := {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0}
+
+# 实体列表（用字典存储，轻量）
+var players: Array = []      # 球员
+var security: Array = []     # 保安
+var riot_npcs: Array = []
+var confetti: Array = []
+var flashes: Array = []      # 看台闪光灯
+
+var player_id := 1
+const MAX_PLAYERS := 14
+const MAX_STARS := 2
+var star_cd := 0.0
+const TEAM_DEFS := [
+	{"name": "ARG", "color": "#75AADB", "star": 10},
+	{"name": "POR", "color": "#cc1122", "star": 7},
+]
+
+var base_security := 2
+var sec_spawn_timer := 0.0
+const LUNGE_RANGE := 70.0
+const LUNGE_CHARGE := 28.0
+const LUNGE_DUR := 16.0
+const LUNGE_RECOVER := 45.0
+const LUNGE_SPEED := 2.4
+const LUNGE_CD_AFTER := 80.0
+
+var riot_active := false
+var riot_timer := 0.0
+
+# 表现层
+var shake := 0.0
+var flash_alpha := 0.0
+var gold_flash := 0.0
+var danger := 0.0
+
+const PHOTO_LINES := [
+	"观众为你振臂高呼！", "比法国超跑还快！", "观众里最锋利的剑！", "名场面诞生了！！",
+	"这画面要刷屏全网了！", "保安都看呆了！", "今晚的主角是他！", "这速度，国足都得连夜集训！",
+]
+const OPENING_LINE := "有球迷冲场了！他tm疯了吗！"
+const CHANT_TEXTS := ["OLE OLE!", "VAMOS!", "一起合影!", "MESSI!", "加油!"]
+var chants: Array = []
+var chant_timer := 0.0
+var crowd_dots: Array = []
+
+# 输入
+var joy_vec := Vector2.ZERO
+var sprint_held := false
+var roll_pressed := false
+
+# 节点引用
+var cam: Camera2D
+var ui: CanvasLayer
+var lbl_score: Label
+var lbl_info: Label
+var lbl_levels: Label
+var lbl_comment: Label
+var bar_stam_fill: ColorRect
+var bar_riot_fill: ColorRect
+var flash_rect: ColorRect
+var gold_rect: ColorRect
+var danger_rect: ColorRect
+var panel_start: Control
+var panel_upgrade: Control
+var panel_over: Control
+var lbl_over_title: Label
+var lbl_over_stats: Label
+var upgrade_box: VBoxContainer
+var comment_timer := 0.0
+var font: Font
+
+# ============================================================================
+func _ready() -> void:
+	randomize()
+	font = ThemeDB.fallback_font
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_build_sprites()
+	_build_crowd_dots()
+	_setup_camera()
+	_setup_environment()
+	_build_ui()
+	set_process(true)
+
+# ----------------------------------------------------------------------------
+# 像素精灵生成
+# ----------------------------------------------------------------------------
+func _make_sprite(pal: Dictionary, legs: Array) -> ImageTexture:
+	var tmpl := BODY + legs
+	var rows := tmpl.size()
+	var cols := (tmpl[0] as String).length()
+	var img := Image.create(cols, rows, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	for r in rows:
+		var line: String = tmpl[r]
+		for c in cols:
+			var ch := line[c]
+			if ch == " ":
+				continue
+			img.set_pixel(c, r, pal.get(ch, Color.WHITE))
+	return ImageTexture.create_from_image(img)
+
+func _char_set(pal: Dictionary) -> Dictionary:
+	return {
+		"stand": _make_sprite(pal, LEGS_STAND),
+		"a": _make_sprite(pal, LEGS_A),
+		"b": _make_sprite(pal, LEGS_B),
+	}
+
+func _build_sprites() -> void:
+	SPRITES["fan"] = _char_set({"h": Color("#5d4037"), "k": Color("#ffccaa"), "1": Color("#ffd700"), "2": Color("#1565c0"), "b": Color("#222222")})
+	SPRITES["argCommon"] = _char_set({"h": Color("#3b3b3b"), "k": Color("#e0b08c"), "1": Color("#75AADB"), "2": Color("#ffffff"), "b": Color("#111111")})
+	SPRITES["argStar"] = _char_set({"h": Color("#222222"), "k": Color("#caa07a"), "1": Color("#75AADB"), "2": Color("#ffd700"), "b": Color("#111111")})
+	SPRITES["porCommon"] = _char_set({"h": Color("#2b2b2b"), "k": Color("#e0b08c"), "1": Color("#cc1122"), "2": Color("#0a6e31"), "b": Color("#111111")})
+	SPRITES["porStar"] = _char_set({"h": Color("#1a1a1a"), "k": Color("#caa07a"), "1": Color("#cc1122"), "2": Color("#ffd700"), "b": Color("#111111")})
+	SPRITES["guard"] = _char_set({"h": Color("#000000"), "k": Color("#caa07a"), "1": Color("#222831"), "2": Color("#11151a"), "b": Color("#000000")})
+	SPRITES["guardElite"] = _char_set({"h": Color("#1a0033"), "k": Color("#caa07a"), "1": Color("#4a148c"), "2": Color("#7b1fa2"), "b": Color("#000000")})
+	SPRITES["riot"] = _char_set({"h": Color("#333333"), "k": Color("#ffccaa"), "1": Color("#69f0ae"), "2": Color("#2e7d32"), "b": Color("#111111")})
+
+func _build_crowd_dots() -> void:
+	var cols := ["#75AADB", "#ffffff", "#cc1122", "#0a6e31", "#ffd700", "#ff7043"]
+	var spacing := 16.0
+	for row in range(4):
+		var x := -STAND_DEPTH
+		while x < WORLD.x + STAND_DEPTH:
+			crowd_dots.append({"p": Vector2(x, -34 - row * 18), "c": Color(cols[randi() % cols.size()]), "ph": randf() * TAU})
+			crowd_dots.append({"p": Vector2(x, WORLD.y + 34 + row * 18), "c": Color(cols[randi() % cols.size()]), "ph": randf() * TAU})
+			x += spacing
+		var y := 0.0
+		while y < WORLD.y:
+			crowd_dots.append({"p": Vector2(-34 - row * 18, y), "c": Color(cols[randi() % cols.size()]), "ph": randf() * TAU})
+			crowd_dots.append({"p": Vector2(WORLD.x + 34 + row * 18, y), "c": Color(cols[randi() % cols.size()]), "ph": randf() * TAU})
+			y += spacing
+
+# ----------------------------------------------------------------------------
+# 相机 + 辉光环境
+# ----------------------------------------------------------------------------
+func _setup_camera() -> void:
+	cam = Camera2D.new()
+	cam.zoom = Vector2(ZOOM, ZOOM)
+	cam.position_smoothing_enabled = true
+	cam.position_smoothing_speed = 12.0
+	cam.position = WORLD / 2.0
+	add_child(cam)
+	cam.make_current()
+
+func _setup_environment() -> void:
+	var we := WorldEnvironment.new()
+	var env := Environment.new()
+	env.background_mode = Environment.BG_CANVAS
+	env.glow_enabled = true
+	env.glow_intensity = 0.9
+	env.glow_strength = 1.1
+	env.glow_bloom = 0.15
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
+	env.glow_hdr_threshold = 0.9
+	we.environment = env
+	add_child(we)
+
+# ============================================================================
+# 主循环
+# ============================================================================
+func _process(delta: float) -> void:
+	var dt: float = min(2.0, delta * 60.0)
+	if state == St.PLAY:
+		elapsed += dt
+		_update_player(dt)
+		_update_players(dt)
+		_refill_players(dt)
+		_update_security(dt)
+		_update_riot(dt)
+		_update_confetti(dt)
+		_update_flashes(dt)
+		_update_chants(dt)
+		_update_danger()
+		cam.position = p_pos
+		if shake > 0:
+			cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake
+			shake = max(0.0, shake - 0.6 * dt)
+		else:
+			cam.offset = Vector2.ZERO
+		if flash_alpha > 0: flash_alpha = max(0.0, flash_alpha - 0.05 * dt)
+		if gold_flash > 0: gold_flash = max(0.0, gold_flash - 0.04 * dt)
+		if p_combo_timer > 0:
+			p_combo_timer -= dt
+			if p_combo_timer <= 0: p_combo = 0
+		_update_hud()
+	if comment_timer > 0:
+		comment_timer -= delta
+		if comment_timer <= 0:
+			lbl_comment.modulate.a = max(0.0, lbl_comment.modulate.a - delta * 3.0)
+	queue_redraw()
+
+# ----------------------------------------------------------------------------
+# 输入
+# ----------------------------------------------------------------------------
+func _move_vector() -> Vector2:
+	var v := Vector2.ZERO
+	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): v.y -= 1
+	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): v.y += 1
+	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): v.x -= 1
+	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): v.x += 1
+	if v.length() > 0:
+		return v.normalized()
+	if joy_vec.length() > 0.15:
+		return joy_vec
+	return Vector2.ZERO
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_SPACE:
+			roll_pressed = true
+
+func _wants_sprint() -> bool:
+	return sprint_held or Input.is_key_pressed(KEY_SHIFT)
+
+# ----------------------------------------------------------------------------
+# 玩家更新
+# ----------------------------------------------------------------------------
+func _update_player(dt: float) -> void:
+	var move := _move_vector()
+	var want_sprint := _wants_sprint() and move.length() > 0 and not p_exhausted and p_stamina > 0
+	var want_roll := roll_pressed and not p_rolling and p_roll_cd <= 0 and p_stamina >= upgrades.roll_cost
+	roll_pressed = false
+	if move.length() > 0: p_face = move
+
+	if p_rolling:
+		p_roll_timer -= dt
+		p_vel = p_roll_dir * 9.0
+		p_pos = _clamp_world_v(p_pos + p_vel * dt, p_radius)
+		if p_roll_timer <= 0:
+			p_rolling = false
+			p_roll_cd = 20.0
+			p_vel *= 0.5
+	elif want_roll:
+		p_rolling = true
+		p_roll_timer = 14.0
+		p_roll_dir = move if move.length() > 0 else p_face
+		p_stamina -= upgrades.roll_cost
+	else:
+		var speed: float = TUNE.player_base_speed * upgrades.speed_mult
+		if p_exhausted:
+			speed *= 0.4
+		elif want_sprint:
+			speed *= TUNE.sprint_mult
+			p_stamina -= 0.4 * dt
+		var target := move * speed
+		p_vel += (target - p_vel) * TUNE.player_accel * dt
+		p_pos = _clamp_world_v(p_pos + p_vel * dt, p_radius)
+
+	_step_anim_player(p_vel.length(), dt)
+	if p_roll_cd > 0: p_roll_cd -= dt
+	if p_stamina <= 0 and not p_exhausted:
+		p_exhausted = true
+		p_exhaust_timer = 120.0
+	if p_exhausted:
+		p_exhaust_timer -= dt
+		if p_exhaust_timer <= 0:
+			p_exhausted = false
+			p_stamina = 20.0
+	if not want_sprint and not p_rolling and p_stamina < upgrades.stamina_max and not p_exhausted:
+		p_stamina += 0.45 * dt
+	p_stamina = clampf(p_stamina, 0.0, upgrades.stamina_max)
+
+func _clamp_world_v(pos: Vector2, r: float) -> Vector2:
+	return Vector2(clampf(pos.x, r, WORLD.x - r), clampf(pos.y, r, WORLD.y - r))
+
+func _clamp_field_v(pos: Vector2, r: float) -> Vector2:
+	return Vector2(clampf(pos.x, FX0 + r, FX1 - r), clampf(pos.y, FY0 + r, FY1 - r))
+
+func _step_anim_player(speed: float, dt: float) -> void:
+	if speed < 0.15:
+		p_anim = "stand"
+		return
+	p_phase += speed * dt
+	p_anim = "a" if int(p_phase / ANIM_STRIDE) % 2 == 0 else "b"
+
+func _step_anim(e: Dictionary, speed: float, dt: float) -> void:
+	if speed < 0.15:
+		e.anim = "stand"
+		return
+	e.phase += speed * dt
+	e.anim = "a" if int(e.phase / ANIM_STRIDE) % 2 == 0 else "b"
+
+# ----------------------------------------------------------------------------
+# 球员（足球运动员）
+# ----------------------------------------------------------------------------
+func _rand_field_edge() -> Vector2:
+	var edge := randi() % 4
+	var m := 20.0
+	match edge:
+		0: return Vector2(FX0 + m + randf() * (FW - 2 * m), FY0 + m)
+		1: return Vector2(FX0 + m + randf() * (FW - 2 * m), FY1 - m)
+		2: return Vector2(FX0 + m, FY0 + m + randf() * (FH - 2 * m))
+		_: return Vector2(FX1 - m, FY0 + m + randf() * (FH - 2 * m))
+
+func _nearest_edge_dir(p: Vector2) -> Vector2:
+	var dl := p.x; var dr := WORLD.x - p.x; var du := p.y; var db := WORLD.y - p.y
+	var mn: float = min(min(dl, dr), min(du, db))
+	if mn == dl: return Vector2(-1, 0)
+	if mn == dr: return Vector2(1, 0)
+	if mn == du: return Vector2(0, -1)
+	return Vector2(0, 1)
+
+func _make_footballer(is_star: bool, at_edge: bool) -> Dictionary:
+	var team: Dictionary = TEAM_DEFS[randi() % TEAM_DEFS.size()]
+	var pos := _rand_field_edge() if at_edge else Vector2(FX0 + 60 + randf() * (FW - 120), FY0 + 60 + randf() * (FH - 120))
+	var smax: float = TUNE.star_stamina if is_star else TUNE.common_stamina
+	var fp := {
+		"id": player_id, "team": team.name, "color": Color(team.color),
+		"number": team.star if is_star else (2 + randi() % 8),
+		"is_star": is_star, "pos": pos, "vel": Vector2.ZERO,
+		"dir": Vector2(randf() - 0.5, randf() - 0.5).normalized(),
+		"wander": randf() * 60.0, "photographed": false, "leaving": false,
+		"fleeing": false, "progress": 0.0, "being_photo": false,
+		"chased": false, "chase_timer": 0.0,
+		"flee_radius": 175.0 if is_star else 100.0,
+		"stamina": smax, "exhausted": false, "exhaust_timer": 0.0,
+		"anim": "stand", "phase": 0.0,
+	}
+	player_id += 1
+	return fp
+
+func _count_stars() -> int:
+	var n := 0
+	for fp in players:
+		if fp.is_star and not fp.leaving: n += 1
+	return n
+
+func _spawn_players() -> void:
+	players.clear()
+	player_id = 1
+	star_cd = 0.0
+	for i in range(MAX_PLAYERS):
+		players.append(_make_footballer(i < MAX_STARS, false))
+
+func _refill_players(dt: float) -> void:
+	if star_cd > 0: star_cd -= dt
+	var alive := 0
+	for fp in players:
+		if not fp.leaving: alive += 1
+	if alive < MAX_PLAYERS:
+		var as_star := false
+		if _count_stars() < MAX_STARS and star_cd <= 0:
+			as_star = true
+			star_cd = 360.0
+		players.append(_make_footballer(as_star, true))
+
+func _update_players(dt: float) -> void:
+	var photo_range: float = 50.0 * upgrades.photo_radius
+	for i in range(players.size() - 1, -1, -1):
+		var fp: Dictionary = players[i]
+		if fp.leaving:
+			fp.vel += (fp.dir * 3.6 - fp.vel) * 0.2 * dt
+			fp.pos += fp.vel * dt
+			_step_anim(fp, fp.vel.length(), dt)
+			if fp.pos.x < -40 or fp.pos.x > WORLD.x + 40 or fp.pos.y < -40 or fp.pos.y > WORLD.y + 40:
+				players.remove_at(i)
+			continue
+
+		var smax: float = TUNE.star_stamina if fp.is_star else TUNE.common_stamina
+		if fp.stamina > smax: fp.stamina = smax
+		var base_speed: float = TUNE.star_speed if fp.is_star else TUNE.common_speed
+		var dist := fp.pos.distance_to(p_pos)
+		var grabbed := dist < photo_range * 0.8 and not p_rolling
+		var want_flee := not grabbed and not p_rolling and dist < fp.flee_radius and fp.stamina > 0 and not fp.exhausted
+
+		var ddir := Vector2.ZERO
+		var dspeed := 0.0
+		if grabbed:
+			fp.fleeing = false
+		elif want_flee:
+			fp.fleeing = true
+			fp.chased = true
+			fp.chase_timer = 90.0
+			ddir = (fp.pos - p_pos).normalized()
+			dspeed = base_speed * 1.5
+			fp.stamina -= (0.8 if fp.is_star else 1.1) * dt
+			if fp.stamina <= 0:
+				fp.stamina = 0
+				fp.exhausted = true
+				fp.exhaust_timer = 70.0
+		else:
+			fp.fleeing = false
+			fp.wander -= dt
+			if fp.wander <= 0:
+				fp.dir = Vector2(randf() - 0.5, randf() - 0.5).normalized()
+				fp.wander = 60.0 + randf() * 90.0
+			ddir = fp.dir
+			dspeed = base_speed * (0.18 if fp.exhausted else 0.45)
+		if ddir.length() > 0: fp.dir = ddir
+
+		if fp.exhausted:
+			fp.exhaust_timer -= dt
+			if fp.exhaust_timer <= 0:
+				fp.exhausted = false
+				fp.stamina = smax * 0.4
+		elif not want_flee:
+			fp.stamina = min(smax, fp.stamina + 0.5 * dt)
+
+		var target := ddir * dspeed
+		fp.vel += (target - fp.vel) * TUNE.fb_accel * dt
+		fp.pos = _clamp_field_v(fp.pos + fp.vel * dt, 12.0)
+		_step_anim(fp, fp.vel.length(), dt)
+
+		if fp.chase_timer > 0: fp.chase_timer -= dt
+		else: fp.chased = false
+
+		var in_range := grabbed or (dist < photo_range and not fp.fleeing)
+		if in_range:
+			fp.being_photo = true
+			fp.progress += (1.3 if grabbed else 1.0) * dt
+			if fp.progress >= 60:
+				_complete_photo(fp)
+		else:
+			fp.being_photo = false
+			fp.progress = max(0.0, fp.progress - dt * 2.0)
+
+func _complete_photo(fp: Dictionary) -> void:
+	fp.photographed = true
+	fp.leaving = true
+	fp.being_photo = false
+	fp.fleeing = false
+	fp.dir = _nearest_edge_dir(fp.pos)
+	photographed += 1
+	var base: int = 400 if fp.is_star else 150
+	var mult := 2 if fp.chased else 1
+	score += base * mult
+	_spawn_confetti(fp.pos)
+	flash_alpha = 1.0 if fp.is_star else 0.7
+	if fp.is_star: gold_flash = 1.0
+	shake = 10.0
+	_say(PHOTO_LINES[randi() % PHOTO_LINES.size()], Color("#ffd700") if fp.is_star else Color.WHITE)
+	p_combo += 1
+	p_combo_timer = 180.0
+	p_riot = min(100.0, p_riot + (35.0 if fp.is_star else 18.0))
+	if p_riot >= 100 and not riot_active:
+		_trigger_riot()
+		p_riot = 0
+	if photographed % 10 == 0:
+		_say("已合影 %d 人！你已经是全场最靓的仔！" % photographed, Color("#ffd700"))
+	_check_upgrade()
+
+func _check_upgrade() -> void:
+	if score >= next_upgrade_at:
+		_show_upgrade()
+		next_upgrade_at = int(round(next_upgrade_at * 1.7 / 100.0) * 100)
+
+# ----------------------------------------------------------------------------
+# 保安
+# ----------------------------------------------------------------------------
+func _spawn_security(elite: bool) -> void:
+	var edge := randi() % 4
+	var pos: Vector2
+	match edge:
+		0: pos = Vector2(randf() * WORLD.x, 0)
+		1: pos = Vector2(randf() * WORLD.x, WORLD.y)
+		2: pos = Vector2(0, randf() * WORLD.y)
+		_: pos = Vector2(WORLD.x, randf() * WORLD.y)
+	security.append({
+		"pos": pos, "vel": Vector2.ZERO, "elite": elite, "radius": 13.0,
+		"state": "chase", "timer": 0.0, "lunge_dir": Vector2.ZERO, "lunge_cd": 0.0,
+		"anim": "stand", "phase": 0.0,
+	})
+
+func _update_security(dt: float) -> void:
+	sec_spawn_timer -= dt
+	var speed_bonus := int((upgrades.speed_mult - 1.0) * 8)
+	var target_count := base_security + int(elapsed / 15.0) + int(score / 1000.0) + speed_bonus + int(photographed / 6.0)
+	if security.size() < min(target_count, 32) and sec_spawn_timer <= 0:
+		_spawn_security(elapsed > 60 and randf() < 0.3)
+		sec_spawn_timer = max(30.0, 90.0 - floor(elapsed / 10.0) - floor(photographed / 4.0))
+
+	var pcur: float = TUNE.player_base_speed * upgrades.speed_mult
+	for s in security:
+		if s.lunge_cd > 0: s.lunge_cd -= dt
+		var chasing_decoy := false
+		if s.state == "charge":
+			s.timer -= dt
+			s.vel *= 0.8
+			if s.timer <= 0:
+				s.state = "lunge"
+				s.timer = LUNGE_DUR
+				s.lunge_dir = (p_pos + p_vel * 6.0 - s.pos).normalized()
+		elif s.state == "lunge":
+			s.timer -= dt
+			var ratio: float = TUNE.sec_ratio_elite if s.elite else TUNE.sec_ratio
+			s.vel = s.lunge_dir * pcur * ratio * LUNGE_SPEED
+			if s.timer <= 0:
+				s.state = "recover"
+				s.timer = LUNGE_RECOVER
+		elif s.state == "recover":
+			s.timer -= dt
+			s.vel *= 0.85
+			if s.timer <= 0:
+				s.state = "chase"
+				s.lunge_cd = LUNGE_CD_AFTER
+		else:
+			var target := p_pos
+			if riot_active and riot_npcs.size() > 0:
+				var nd := INF
+				var nearest = null
+				for r in riot_npcs:
+					var d: float = s.pos.distance_to(r.pos)
+					if d < nd: nd = d; nearest = r
+				if nearest != null and nd < 260:
+					target = nearest.pos
+					chasing_decoy = true
+			var dir := (target - s.pos).normalized()
+			if s.elite and not chasing_decoy:
+				dir = (p_pos + p_vel * 8.0 - s.pos).normalized()
+			var ratio: float = TUNE.sec_ratio_elite if s.elite else TUNE.sec_ratio
+			var accel: float = TUNE.security_accel_elite if s.elite else TUNE.security_accel
+			var target_vel := dir * pcur * ratio
+			s.vel += (target_vel - s.vel) * accel * dt
+			var dpl := s.pos.distance_to(p_pos)
+			if not chasing_decoy and not p_rolling and dpl < LUNGE_RANGE and s.lunge_cd <= 0:
+				s.state = "charge"
+				s.timer = LUNGE_CHARGE
+				s.vel *= 0.3
+		s.pos = _clamp_world_v(s.pos + s.vel * dt, s.radius)
+		_step_anim(s, s.vel.length(), dt)
+		if not chasing_decoy and not p_rolling and not god_mode:
+			if s.pos.distance_to(p_pos) < s.radius + p_radius:
+				_game_over()
+				return
+
+# ----------------------------------------------------------------------------
+# 暴动
+# ----------------------------------------------------------------------------
+func _trigger_riot() -> void:
+	riot_active = true
+	riot_timer = 480.0
+	var n := 3 + randi() % 3
+	for i in range(n):
+		riot_npcs.append({
+			"pos": Vector2(randf() * WORLD.x, randf() * WORLD.y), "vel": Vector2.ZERO,
+			"dir": Vector2(randf() - 0.5, randf() - 0.5).normalized(), "wander": 0.0,
+			"anim": "stand", "phase": 0.0,
+		})
+
+func _update_riot(dt: float) -> void:
+	if not riot_active: return
+	riot_timer -= dt
+	for r in riot_npcs:
+		r.wander -= dt
+		if r.wander <= 0:
+			r.dir = Vector2(randf() - 0.5, randf() - 0.5).normalized()
+			r.wander = 30.0 + randf() * 60.0
+		r.pos = _clamp_world_v(r.pos + r.dir * 2.4 * dt, 10.0)
+		_step_anim(r, 2.4, dt)
+	if riot_timer <= 0:
+		riot_active = false
+		riot_npcs.clear()
+
+# ----------------------------------------------------------------------------
+# 粒子 / 表现
+# ----------------------------------------------------------------------------
+func _spawn_confetti(pos: Vector2) -> void:
+	var cols := ["#ff5252", "#ffd740", "#69f0ae", "#40c4ff", "#e040fb"]
+	for i in range(24):
+		confetti.append({
+			"pos": pos, "vel": Vector2((randf() - 0.5) * 6, (randf() - 1.5) * 6),
+			"color": Color(cols[randi() % cols.size()]), "life": 60.0 + randf() * 30.0,
+			"rot": randf() * TAU, "vr": (randf() - 0.5) * 0.3,
+		})
+
+func _update_confetti(dt: float) -> void:
+	for i in range(confetti.size() - 1, -1, -1):
+		var c: Dictionary = confetti[i]
+		c.pos += c.vel * dt
+		c.vel.y += 0.15 * dt
+		c.rot += c.vr * dt
+		c.life -= dt
+		if c.life <= 0: confetti.remove_at(i)
+
+func _update_flashes(dt: float) -> void:
+	if randf() < 0.5:
+		var top := randf() < 0.5
+		flashes.append({"pos": Vector2(randf() * WORLD.x, (20.0 if top else WORLD.y - 40) + randf() * 30), "life": 10.0})
+	for i in range(flashes.size() - 1, -1, -1):
+		flashes[i].life -= dt
+		if flashes[i].life <= 0: flashes.remove_at(i)
+
+func _update_chants(dt: float) -> void:
+	chant_timer -= dt
+	if chant_timer <= 0:
+		chant_timer = 90.0 + randf() * 120.0
+		var top := randf() < 0.5
+		chants.append({"pos": Vector2(randf() * WORLD.x, -40.0 if top else WORLD.y + 50), "text": CHANT_TEXTS[randi() % CHANT_TEXTS.size()], "life": 90.0})
+	for i in range(chants.size() - 1, -1, -1):
+		chants[i].life -= dt
+		chants[i].pos.y -= dt * 0.3
+		if chants[i].life <= 0: chants.remove_at(i)
+
+func _update_danger() -> void:
+	var mn := INF
+	for s in security:
+		var d: float = s.pos.distance_to(p_pos)
+		if d < mn: mn = d
+	danger = clampf(1.0 - (mn - 30.0) / 180.0, 0.0, 1.0)
+	danger_rect.modulate.a = danger * 0.55
+
+# ============================================================================
+# 绘制（世界坐标，相机负责变换）
+# ============================================================================
+func _draw() -> void:
+	if state == St.MENU:
+		_draw_pitch()
+		return
+	_draw_pitch()
+	_draw_footballers()
+	_draw_riot()
+	_draw_security()
+	_draw_player()
+	_draw_confetti()
+
+func _draw_sprite(tex: ImageTexture, pos: Vector2, w: float, h: float, flip: bool, bob: float, mod: Color = Color.WHITE) -> void:
+	draw_set_transform(pos, 0.0, Vector2(-1.0 if flip else 1.0, 1.0))
+	draw_texture_rect(tex, Rect2(-w / 2.0, -h * 0.62 + bob, w, h), false, mod)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+func _hop(e) -> float:
+	var anim: String = e.anim if e is Dictionary else p_anim
+	var phase: float = e.phase if e is Dictionary else p_phase
+	if anim == "stand": return 0.0
+	return -abs(sin(phase * 0.35)) * 3.2
+
+func _draw_pitch() -> void:
+	# 看台底
+	draw_rect(Rect2(-STAND_DEPTH, -STAND_DEPTH, WORLD.x + STAND_DEPTH * 2, WORLD.y + STAND_DEPTH * 2), Color("#33312e"))
+	for i in range(4):
+		var d := STAND_DEPTH - i * (STAND_DEPTH / 4.0)
+		var col := Color(0.27, 0.25, 0.22, 0.6) if i % 2 == 0 else Color(0.2, 0.18, 0.16, 0.6)
+		draw_rect(Rect2(-d, -d, WORLD.x + d * 2, WORLD.y + d * 2), col)
+	# 观众点阵（律动 + 闪烁）
+	var t := Time.get_ticks_msec()
+	for dot in crowd_dots:
+		var bob := sin(t * 0.006 + dot.ph) * 2.0
+		var fl := 0.65 + 0.35 * sin(t * 0.012 + dot.ph * 1.7)
+		var c: Color = dot.c
+		c.a = fl
+		draw_rect(Rect2(dot.p.x - 2, dot.p.y - 2 + bob, 4, 5), c)
+	# 助威字幕
+	for ch in chants:
+		var a: float = clampf(ch.life / 90.0, 0.0, 1.0)
+		draw_string(font, ch.pos, ch.text, HORIZONTAL_ALIGNMENT_CENTER, -1, 22, Color(1, 1, 1, a))
+	# 跑道（外圈可走动草地，深色）
+	draw_rect(Rect2(0, 0, WORLD.x, WORLD.y), Color("#246627"))
+	# 球场草坪 + 条纹
+	draw_rect(Rect2(FX0, FY0, FW, FH), Color("#2e7d32"))
+	var sw := 100.0
+	var x := FX0
+	var idx := 0
+	while x < FX1:
+		if idx % 2 == 0:
+			draw_rect(Rect2(x, FY0, min(sw, FX1 - x), FH), Color(1, 1, 1, 0.045))
+		x += sw
+		idx += 1
+	_draw_field_lines()
+	# 看台闪光灯
+	for f in flashes:
+		draw_circle(f.pos, 4, Color(1, 1, 1, 0.5 * (f.life / 10.0)))
+
+func _draw_field_lines() -> void:
+	var lw := 3.0
+	var col := Color(1, 1, 1, 0.85)
+	var cx := WORLD.x / 2.0
+	var cy := WORLD.y / 2.0
+	draw_rect(Rect2(FX0, FY0, FW, FH), col, false, lw)
+	draw_line(Vector2(cx, FY0), Vector2(cx, FY1), col, lw)
+	var cr := min(FW, FH) * 0.12
+	draw_arc(Vector2(cx, cy), cr, 0, TAU, 48, col, lw)
+	draw_circle(Vector2(cx, cy), 4, col)
+	var pd := FW * 0.13; var ph := FH * 0.55
+	var gd := FW * 0.045; var gh := FH * 0.28
+	var spot := FW * 0.085; var arc_r := FH * 0.10
+	for side in [{"gx": FX0, "s": 1.0}, {"gx": FX1, "s": -1.0}]:
+		var gx: float = side.gx; var s: float = side.s
+		draw_rect(Rect2(gx if s > 0 else gx - pd, cy - ph / 2, pd, ph), col, false, lw)
+		draw_rect(Rect2(gx if s > 0 else gx - gd, cy - gh / 2, gd, gh), col, false, lw)
+		var sp := Vector2(gx + s * spot, cy)
+		draw_circle(sp, 4, col)
+		var a0 := -PI / 2.6 if s > 0 else PI - PI / 2.6
+		var a1 := PI / 2.6 if s > 0 else PI + PI / 2.6
+		draw_arc(sp, arc_r, a0, a1, 24, col, lw)
+		var goal_d := 24.0; var goal_h := FH * 0.13
+		draw_rect(Rect2(gx - goal_d if s > 0 else gx, cy - goal_h / 2, goal_d, goal_h), Color(1, 1, 1, 0.95), false, lw)
+	var ccr := 24.0
+	for c in [[FX0, FY0, 0.0, PI / 2], [FX1, FY0, PI / 2, PI], [FX1, FY1, PI, PI * 1.5], [FX0, FY1, PI * 1.5, TAU]]:
+		draw_arc(Vector2(c[0], c[1]), ccr, c[2], c[3], 12, col, lw)
+
+func _draw_footballers() -> void:
+	for fp in players:
+		var key: String
+		if fp.team == "ARG":
+			key = "argStar" if fp.is_star else "argCommon"
+		else:
+			key = "porStar" if fp.is_star else "porCommon"
+		var w: float = 30.0 if fp.is_star else 24.0
+		var h: float = 44.0 if fp.is_star else 36.0
+		var bob := _hop(fp)
+		var mod := Color(1, 1, 1, 0.7) if fp.leaving else Color.WHITE
+		_draw_sprite(SPRITES[key][fp.anim], fp.pos, w, h, fp.dir.x < -0.1, bob, mod)
+		draw_string(font, fp.pos + Vector2(-5, -2 + bob), str(fp.number), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.WHITE)
+		if fp.is_star:
+			draw_arc(fp.pos + Vector2(0, -4 + bob), 20, 0, TAU, 20, Color("#ffd700"), 2.0)
+		# 体力槽
+		if not fp.leaving:
+			var smax: float = TUNE.star_stamina if fp.is_star else TUNE.common_stamina
+			if fp.fleeing or fp.exhausted or fp.stamina < smax - 0.5:
+				_draw_mini_bar(fp.pos + Vector2(0, -(30.0 if fp.is_star else 24.0)), fp.stamina / smax, 34.0 if fp.is_star else 20.0, fp.exhausted)
+		if fp.being_photo:
+			draw_arc(fp.pos + Vector2(0, -4), 25, -PI / 2, -PI / 2 + (fp.progress / 60.0) * TAU, 24, Color("#00e5ff"), 3.0)
+
+func _draw_mini_bar(pos: Vector2, frac: float, w: float, exhausted: bool) -> void:
+	var h := 4.0
+	draw_rect(Rect2(pos.x - w / 2, pos.y, w, h), Color(0, 0, 0, 0.5))
+	var col: Color
+	if exhausted: col = Color("#888888")
+	elif frac < 0.3: col = Color("#ff5252")
+	elif frac < 0.6: col = Color("#ffc107")
+	else: col = Color("#4caf50")
+	draw_rect(Rect2(pos.x - w / 2, pos.y, w * max(0.0, frac), h), col)
+
+func _draw_security() -> void:
+	for s in security:
+		var scale := 1.0
+		var alpha := 1.0
+		if s.state == "charge":
+			var t := Time.get_ticks_msec()
+			draw_arc(s.pos + Vector2(0, -14), 16, 0, TAU, 20, Color(1, 0.16, 0.16, 0.4 + 0.4 * sin(t * 0.02)), 3.0)
+			scale = 0.9
+		elif s.state == "lunge":
+			scale = 1.18
+		elif s.state == "recover":
+			alpha = 0.55
+		var key: String = "guardElite" if s.elite else "guard"
+		var bob := _hop(s) if s.state == "chase" else 0.0
+		_draw_sprite(SPRITES[key][s.anim], s.pos, 26 * scale, 38 * scale, s.vel.x < -0.1, bob, Color(1, 1, 1, alpha))
+		if s.elite:
+			draw_string(font, s.pos + Vector2(-6, -32), "★", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#ffd700"))
+
+func _draw_riot() -> void:
+	for r in riot_npcs:
+		_draw_sprite(SPRITES["riot"][r.anim], r.pos, 22, 34, r.dir.x < -0.1, _hop(r))
+
+func _draw_player() -> void:
+	_draw_sprite(SPRITES["fan"][p_anim], p_pos, 28, 42, p_face.x < -0.1, 0.0 if p_rolling else _hop(self))
+	# 头顶体力槽
+	var w := 40.0; var h := 5.0
+	var y := p_pos.y - (p_radius + 16)
+	draw_rect(Rect2(p_pos.x - w / 2, y, w, h), Color(0, 0, 0, 0.5))
+	var col := Color("#888888") if p_exhausted else Color("#4caf50")
+	draw_rect(Rect2(p_pos.x - w / 2, y, w * (p_stamina / upgrades.stamina_max), h), col)
+
+func _draw_confetti() -> void:
+	for c in confetti:
+		draw_set_transform(c.pos, c.rot, Vector2.ONE)
+		draw_rect(Rect2(-3, -5, 6, 10), c.color)
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+# ============================================================================
+# UI（代码构建）
+# ============================================================================
+func _mk_label(text: String, size: int, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	l.add_theme_constant_override("outline_size", 4)
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	return l
+
+func _build_ui() -> void:
+	ui = CanvasLayer.new()
+	add_child(ui)
+
+	# 分数 + 信息（顶部居中）
+	lbl_score = _mk_label("0", 30, Color("#ffd700"))
+	lbl_score.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lbl_score.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_score.position.y = 8
+	ui.add_child(lbl_score)
+
+	lbl_info = _mk_label("存活 00:00  已合影 0", 14, Color(1, 1, 1, 0.9))
+	lbl_info.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lbl_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_info.position.y = 46
+	ui.add_child(lbl_info)
+
+	# 升级等级（右上）
+	lbl_levels = _mk_label("", 12, Color("#ffd700"))
+	lbl_levels.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	lbl_levels.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	lbl_levels.position = Vector2(-12, 8)
+	lbl_levels.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	ui.add_child(lbl_levels)
+
+	# 解说
+	lbl_comment = _mk_label("", 22, Color.WHITE)
+	lbl_comment.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	lbl_comment.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_comment.position.y = 96
+	lbl_comment.modulate.a = 0
+	ui.add_child(lbl_comment)
+
+	# 体力槽 + 狂热槽（底部居中）
+	bar_stam_fill = _mk_bar(Color("#4caf50"), 30, 13, "体力")
+	bar_riot_fill = _mk_bar(Color("#ff8800"), 14, 9, "狂热")
+
+	# 闪光 / 金光 / 危机 全屏
+	flash_rect = _full_rect(Color(1, 1, 1, 1)); flash_rect.modulate.a = 0
+	gold_rect = _full_rect(Color("#ffd700")); gold_rect.modulate.a = 0
+	danger_rect = _full_rect(Color(0.8, 0, 0, 1)); danger_rect.modulate.a = 0
+
+	_build_touch_controls()
+	_build_panels()
+
+func _mk_bar(fill_color: Color, bottom: int, h: int, label_text: String) -> ColorRect:
+	var w := 200.0
+	var bg := ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.55)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bg.anchor_left = 0.5; bg.anchor_right = 0.5; bg.anchor_top = 1.0; bg.anchor_bottom = 1.0
+	bg.offset_left = -w / 2; bg.offset_right = w / 2
+	bg.offset_top = -float(bottom + h); bg.offset_bottom = -float(bottom)
+	ui.add_child(bg)
+	var fill := ColorRect.new()
+	fill.color = fill_color
+	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fill.offset_left = 0; fill.offset_top = 0; fill.offset_right = w; fill.offset_bottom = h
+	bg.add_child(fill)
+	var lab := _mk_label(label_text, 11, Color(0.8, 1, 0.93))
+	lab.position = Vector2(-36, -2)
+	bg.add_child(lab)
+	return fill
+
+func _full_rect(color: Color) -> ColorRect:
+	var r := ColorRect.new()
+	r.color = color
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ui.add_child(r)
+	return r
+
+func _place(c: Control, al: float, at: float, ar: float, ab: float, ol: float, ot: float, ore: float, ob: float) -> void:
+	c.anchor_left = al; c.anchor_top = at; c.anchor_right = ar; c.anchor_bottom = ab
+	c.offset_left = ol; c.offset_top = ot; c.offset_right = ore; c.offset_bottom = ob
+
+func _build_touch_controls() -> void:
+	# 虚拟摇杆（左下）
+	var joy := Control.new()
+	_place(joy, 0, 1, 0, 1, 30, -150, 150, -30)
+	joy.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui.add_child(joy)
+	var joy_bg := _circle_panel(120, Color(1, 1, 1, 0.15))
+	joy.add_child(joy_bg)
+	var knob := _circle_panel(50, Color(1, 1, 1, 0.5))
+	knob.position = Vector2(35, 35)
+	joy.add_child(knob)
+	joy.gui_input.connect(func(e): _joy_input(e, joy, knob))
+
+	# 冲刺 / 翻滚按钮（右下）
+	var sp := _circle_button("冲刺", Color(1, 0.31, 0.31, 0.5))
+	_place(sp, 1, 1, 1, 1, -190, -120, -110, -40)
+	ui.add_child(sp)
+	sp.button_down.connect(func(): sprint_held = true)
+	sp.button_up.connect(func(): sprint_held = false)
+
+	var rl := _circle_button("翻滚", Color(0.31, 0.59, 1, 0.5))
+	_place(rl, 1, 1, 1, 1, -100, -120, -20, -40)
+	ui.add_child(rl)
+	rl.button_down.connect(func(): roll_pressed = true)
+
+func _circle_panel(d: float, col: Color) -> Panel:
+	var p := Panel.new()
+	p.size = Vector2(d, d)
+	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = col
+	sb.corner_radius_top_left = int(d / 2); sb.corner_radius_top_right = int(d / 2)
+	sb.corner_radius_bottom_left = int(d / 2); sb.corner_radius_bottom_right = int(d / 2)
+	p.add_theme_stylebox_override("panel", sb)
+	return p
+
+func _circle_button(text: String, col: Color) -> Button:
+	var b := Button.new()
+	b.text = text
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = col
+	sb.set_corner_radius_all(40)
+	b.add_theme_stylebox_override("normal", sb)
+	b.add_theme_stylebox_override("hover", sb)
+	b.add_theme_stylebox_override("pressed", sb)
+	b.add_theme_color_override("font_color", Color.WHITE)
+	return b
+
+func _joy_input(e: InputEvent, joy: Control, knob: Panel) -> void:
+	var active := false
+	var local := Vector2.ZERO
+	if e is InputEventScreenTouch:
+		if not e.pressed:
+			joy_vec = Vector2.ZERO; knob.position = Vector2(35, 35); return
+		local = e.position - joy.size / 2.0; active = true
+	elif e is InputEventScreenDrag:
+		local = e.position - joy.size / 2.0; active = true
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+		if not e.pressed:
+			joy_vec = Vector2.ZERO; knob.position = Vector2(35, 35); return
+		local = e.position - joy.size / 2.0; active = true
+	elif e is InputEventMouseMotion and (e.button_mask & MOUSE_BUTTON_MASK_LEFT):
+		local = e.position - joy.size / 2.0; active = true
+	if active:
+		var r := 40.0
+		if local.length() > r:
+			local = local.normalized() * r
+		knob.position = Vector2(35, 35) + local
+		joy_vec = local / r
+
+# ----------------------------------------------------------------------------
+# 面板（开始 / 升级 / 结束）
+# ----------------------------------------------------------------------------
+func _build_panels() -> void:
+	panel_start = _overlay()
+	var v := _center_box()
+	panel_start.add_child(v)
+	v.add_child(_mk_label("Pitch Invader: World Cup Craze", 30, Color("#ffd700")))
+	var desc := _mk_label("冲入决赛球场，疯狂和球员合影刷分！球员源源不断登场，撑到被保安逮捕为止。\n大牌球星(10/7号)会逃跑，贴脸抓住强制合影得双倍分。\nWASD移动，Shift冲刺，Space翻滚；移动端用左摇杆+右按钮。", 15, Color(1, 1, 1, 0.85))
+	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	desc.custom_minimum_size = Vector2(620, 0)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(desc)
+	var btn := _menu_button("开始冲场")
+	v.add_child(btn)
+	btn.pressed.connect(_start_game)
+
+	panel_upgrade = _overlay()
+	panel_upgrade.visible = false
+	var uv := _center_box()
+	panel_upgrade.add_child(uv)
+	uv.add_child(_mk_label("升级时刻！", 26, Color("#ffd700")))
+	upgrade_box = VBoxContainer.new()
+	upgrade_box.add_theme_constant_override("separation", 12)
+	uv.add_child(upgrade_box)
+
+	panel_over = _overlay()
+	panel_over.visible = false
+	var ov := _center_box()
+	panel_over.add_child(ov)
+	lbl_over_title = _mk_label("被保安逮捕了！", 34, Color("#ffd700"))
+	ov.add_child(lbl_over_title)
+	lbl_over_stats = _mk_label("", 18, Color.WHITE)
+	lbl_over_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ov.add_child(lbl_over_stats)
+	var rb := _menu_button("再次冲场")
+	ov.add_child(rb)
+	rb.pressed.connect(_start_game)
+
+func _overlay() -> Control:
+	var c := ColorRect.new()
+	c.color = Color(0, 0, 0, 0.8)
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	c.mouse_filter = Control.MOUSE_FILTER_STOP
+	ui.add_child(c)
+	return c
+
+func _center_box() -> VBoxContainer:
+	var v := VBoxContainer.new()
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", 14)
+	v.set_anchors_preset(Control.PRESET_CENTER)
+	v.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	v.grow_vertical = Control.GROW_DIRECTION_BOTH
+	# 居中：用全屏容器
+	v.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return v
+
+func _menu_button(text: String) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.custom_minimum_size = Vector2(220, 56)
+	b.add_theme_font_size_override("font_size", 20)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color("#4caf50")
+	sb.set_corner_radius_all(8)
+	b.add_theme_stylebox_override("normal", sb)
+	var sb2: StyleBoxFlat = sb.duplicate()
+	sb2.bg_color = Color("#66bb6a")
+	b.add_theme_stylebox_override("hover", sb2)
+	b.add_theme_stylebox_override("pressed", sb2)
+	b.add_theme_color_override("font_color", Color.WHITE)
+	b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	return b
+
+# ----------------------------------------------------------------------------
+# 升级面板逻辑
+# ----------------------------------------------------------------------------
+func _show_upgrade() -> void:
+	state = St.UPGRADE
+	panel_upgrade.visible = true
+	for c in upgrade_box.get_children():
+		c.queue_free()
+	var choices := [
+		{"label": "体力上限 +30", "key": "stamina_max"},
+		{"label": "移速/冲刺速度 +15%", "key": "speed_mult"},
+		{"label": "翻滚消耗 -1", "key": "roll_cost"},
+		{"label": "合影判定半径 +20%", "key": "photo_radius"},
+	]
+	choices.shuffle()
+	for i in range(2):
+		var ch: Dictionary = choices[i]
+		var b := _menu_button(ch.label)
+		b.custom_minimum_size = Vector2(300, 52)
+		var sb := StyleBoxFlat.new()
+		sb.bg_color = Color("#1b5e20")
+		sb.set_corner_radius_all(10)
+		sb.set_border_width_all(2)
+		sb.border_color = Color("#4caf50")
+		b.add_theme_stylebox_override("normal", sb)
+		var key: String = ch.key
+		b.pressed.connect(func(): _apply_upgrade(key))
+		upgrade_box.add_child(b)
+
+func _apply_upgrade(key: String) -> void:
+	match key:
+		"stamina_max":
+			upgrades.stamina_max += 30; p_stamina = upgrades.stamina_max
+		"speed_mult":
+			upgrades.speed_mult += 0.15
+		"roll_cost":
+			upgrades.roll_cost = max(1.0, upgrades.roll_cost - 1)
+		"photo_radius":
+			upgrades.photo_radius += 0.2
+	up_levels[key] += 1
+	gold_flash = 0.6
+	_say("永久强化已生效！", Color("#ffd700"))
+	panel_upgrade.visible = false
+	state = St.PLAY
+	_update_levels()
+
+func _update_levels() -> void:
+	lbl_levels.text = "体力 Lv%d  移速 Lv%d\n翻滚 Lv%d  视野 Lv%d" % [up_levels.stamina_max, up_levels.speed_mult, up_levels.roll_cost, up_levels.photo_radius]
+
+# ----------------------------------------------------------------------------
+# 解说
+# ----------------------------------------------------------------------------
+func _say(text: String, color: Color) -> void:
+	lbl_comment.text = text
+	lbl_comment.add_theme_color_override("font_color", color)
+	lbl_comment.modulate.a = 1.0
+	comment_timer = 2.4
+
+# ----------------------------------------------------------------------------
+# 流程控制
+# ----------------------------------------------------------------------------
+func _start_game() -> void:
+	score = 0; elapsed = 0; photographed = 0; next_upgrade_at = 1000
+	upgrades = {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": 5.0, "photo_radius": 1.0}
+	up_levels = {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0}
+	p_pos = Vector2(WORLD.x / 2, FY1 - 6)
+	p_vel = Vector2.ZERO
+	p_face = Vector2(0, -1)
+	p_stamina = 100; p_exhausted = false; p_rolling = false; p_roll_cd = 0
+	p_combo = 0; p_combo_timer = 0; p_riot = 0
+	p_anim = "stand"; p_phase = 0
+	_spawn_players()
+	security.clear()
+	for i in range(base_security): _spawn_security(false)
+	riot_npcs.clear(); riot_active = false
+	confetti.clear(); flashes.clear(); chants.clear()
+	shake = 0; flash_alpha = 0; gold_flash = 0
+	cam.position = p_pos
+	cam.reset_smoothing()
+	panel_start.visible = false
+	panel_over.visible = false
+	panel_upgrade.visible = false
+	_update_levels()
+	state = St.PLAY
+	_say(OPENING_LINE, Color.WHITE)
+
+func _game_over() -> void:
+	state = St.OVER
+	lbl_over_title.text = "被保安逮捕了！"
+	lbl_over_stats.text = "得分：%d\n合影人数：%d\n存活时间：%s" % [score, photographed, _fmt_time(elapsed)]
+	panel_over.visible = true
+
+func _fmt_time(frames: float) -> String:
+	var total := int(frames / 60.0)
+	return "%02d:%02d" % [total / 60, total % 60]
+
+func _update_hud() -> void:
+	lbl_score.text = str(score)
+	lbl_info.text = "存活 %s   已合影 %d" % [_fmt_time(elapsed), photographed]
+	flash_rect.modulate.a = flash_alpha
+	gold_rect.modulate.a = gold_flash
+	var sw: float = (bar_stam_fill.get_parent() as Control).size.x
+	bar_stam_fill.size = Vector2(sw * clampf(p_stamina / upgrades.stamina_max, 0, 1), bar_stam_fill.size.y)
+	bar_stam_fill.color = Color("#888888") if p_exhausted else (Color("#ff5252") if p_stamina < 25 else Color("#4caf50"))
+	var rw: float = (bar_riot_fill.get_parent() as Control).size.x
+	bar_riot_fill.size = Vector2(rw * clampf(p_riot / 100.0, 0, 1), bar_riot_fill.size.y)
