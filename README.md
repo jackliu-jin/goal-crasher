@@ -55,10 +55,15 @@ goal-crasher/
 └── README.md
 ```
 
-## 五、调数值
+## 五、调数值与文案（看 `Config.gd`）
 
-`Game.gd` 顶部 `TUNE` 字典集中了惯性、速度、体力等参数；合影半径、飞扑时长、保安数量公式
-等也都在脚本里，改完按 F5 或 push 触发重新构建即可。
+所有**可调参数**、**调试开关**、**解说/文案内容库**都集中在 [`Config.gd`](Config.gd)（`GameConfig`）：
+
+- `DEBUG`：`god_mode`（无敌）、`start_immediately`（跳过菜单直开）、`mute_audio`（静音）。
+- `OPENING_LINE` / `PHOTO_LINES` / `STAR_PHOTO_LINES` / `MILESTONE_TEMPLATE` / `CHANT_TEXTS`：所有台词，随便加随便改。
+- `default_tune()`：惯性、速度、体力、保安初始数量与互斥、翻滚消耗/距离等数值，改一处即生效。
+
+改完按 F5（本地）或 push（触发云端重新构建）即可。其余少量常量（飞扑时长等）仍在 `Game.gd` 顶部。
 
 ## 六、已实现机制
 

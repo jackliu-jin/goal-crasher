@@ -20,20 +20,8 @@ const STAND_DEPTH := 260.0
 # ----------------------------------------------------------------------------
 # 可调参数（对应 JS 版 TUNE，便于后续平衡）
 # ----------------------------------------------------------------------------
-var TUNE := {
-	"player_accel": 0.22,
-	"security_accel": 0.045,
-	"security_accel_elite": 0.075,
-	"fb_accel": 0.10,
-	"player_base_speed": 2.6,
-	"sprint_mult": 1.8,
-	"sec_ratio": 0.62,
-	"sec_ratio_elite": 0.85,
-	"star_speed": 2.5,
-	"common_speed": 1.9,
-	"star_stamina": 170.0,
-	"common_stamina": 55.0,
-}
+# 所有可调参数来自 Config.gd（GameConfig），在 _ready 里初始化，运行时可被调试修改
+var TUNE: Dictionary = {}
 
 # ----------------------------------------------------------------------------
 # 像素精灵模板（与 JS 版一致）
@@ -105,14 +93,13 @@ const TEAM_DEFS := [
 	{"name": "POR", "color": "#cc1122", "star": 7},
 ]
 
-var base_security := 2
 var sec_spawn_timer := 0.0
 const LUNGE_RANGE := 70.0
-const LUNGE_CHARGE := 28.0
+const LUNGE_CHARGE := 26.0
 const LUNGE_DUR := 16.0
-const LUNGE_RECOVER := 45.0
-const LUNGE_SPEED := 2.4
-const LUNGE_CD_AFTER := 80.0
+const LUNGE_RECOVER := 38.0   # 飞扑后定在原地的时间，结束后换角度包抄
+const LUNGE_SPEED := 2.6
+const LUNGE_CD_AFTER := 70.0
 
 var riot_active := false
 var riot_timer := 0.0
@@ -123,12 +110,7 @@ var flash_alpha := 0.0
 var gold_flash := 0.0
 var danger := 0.0
 
-const PHOTO_LINES := [
-	"观众为你振臂高呼！", "比法国超跑还快！", "观众里最锋利的剑！", "名场面诞生了！！",
-	"这画面要刷屏全网了！", "保安都看呆了！", "今晚的主角是他！", "这速度，国足都得连夜集训！",
-]
-const OPENING_LINE := "有球迷冲场了！他tm疯了吗！"
-const CHANT_TEXTS := ["OLE OLE!", "VAMOS!", "一起合影!", "MESSI!", "加油!"]
+# 解说/文本均来自 Config.gd（GameConfig）
 var chants: Array = []
 var chant_timer := 0.0
 var crowd_dots: Array = []
@@ -141,6 +123,7 @@ var roll_pressed := false
 # 节点引用
 var cam: Camera2D
 var ui: CanvasLayer
+var shutter_player: AudioStreamPlayer
 var lbl_score: Label
 var lbl_info: Label
 var lbl_levels: Label
@@ -162,6 +145,7 @@ var font: Font
 # ============================================================================
 func _ready() -> void:
 	randomize()
+	TUNE = GameConfig.default_tune()
 	font = _load_cjk_font()
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_build_sprites()
@@ -169,7 +153,11 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_environment()
 	_build_ui()
+	_setup_audio()
+	god_mode = GameConfig.DEBUG.god_mode
 	set_process(true)
+	if GameConfig.DEBUG.start_immediately:
+		_start_game()
 
 # 加载内置的像素中文字体（Zpix）。直接读原始字节构建 FontFile，绕开 Godot 导入系统，
 # 确保打包进 web 构建（cjkfont.dat 由 export_presets 的 include_filter 强制包含）。
@@ -264,6 +252,46 @@ func _setup_environment() -> void:
 	we.environment = env
 	add_child(we)
 
+# ----------------------------------------------------------------------------
+# 音效：程序化合成相机"咔嚓"快门声（无需音频素材）
+# ----------------------------------------------------------------------------
+func _setup_audio() -> void:
+	shutter_player = AudioStreamPlayer.new()
+	shutter_player.stream = _make_shutter_wav()
+	shutter_player.volume_db = -4.0
+	shutter_player.max_polyphony = 5  # 连拍时允许叠加
+	add_child(shutter_player)
+
+func _make_shutter_wav() -> AudioStreamWAV:
+	var rate := 22050
+	var dur := 0.13
+	var n := int(dur * rate)
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in range(n):
+		var t := float(i) / float(rate)
+		var env := 0.0
+		# 第一声"咔"
+		if t < 0.045:
+			env = exp(-t / 0.012)
+		# 第二声"嚓"（稍晚、稍轻）
+		if t >= 0.06 and t < 0.12:
+			env = max(env, 0.8 * exp(-(t - 0.06) / 0.018))
+		var sample := (randf() * 2.0 - 1.0) * env * 0.6
+		var v := int(clampf(sample, -1.0, 1.0) * 32767.0)
+		data[i * 2] = v & 0xFF
+		data[i * 2 + 1] = (v >> 8) & 0xFF
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = rate
+	wav.stereo = false
+	wav.data = data
+	return wav
+
+func _play_shutter() -> void:
+	if shutter_player != null and not GameConfig.DEBUG.mute_audio:
+		shutter_player.play()
+
 # ============================================================================
 # 主循环
 # ============================================================================
@@ -333,7 +361,7 @@ func _update_player(dt: float) -> void:
 
 	if p_rolling:
 		p_roll_timer -= dt
-		p_vel = p_roll_dir * 9.0
+		p_vel = p_roll_dir * float(TUNE.roll_speed)
 		p_pos = _clamp_world_v(p_pos + p_vel * dt, p_radius)
 		if p_roll_timer <= 0:
 			p_rolling = false
@@ -341,7 +369,7 @@ func _update_player(dt: float) -> void:
 			p_vel *= 0.5
 	elif want_roll:
 		p_rolling = true
-		p_roll_timer = 14.0
+		p_roll_timer = float(TUNE.roll_duration)
 		p_roll_dir = move if move.length() > 0 else p_face
 		p_stamina -= upgrades.roll_cost
 	else:
@@ -481,6 +509,15 @@ func _update_players(dt: float) -> void:
 			fp.chased = true
 			fp.chase_timer = 90.0
 			ddir = (fp.pos - p_pos).normalized()
+			# 避墙：靠近边界时把逃跑方向往场内拨，避免被卡在墙角任人宰割
+			var avoid := Vector2.ZERO
+			var wm := 90.0
+			if fp.pos.x < FX0 + wm: avoid.x += 1.0
+			elif fp.pos.x > FX1 - wm: avoid.x -= 1.0
+			if fp.pos.y < FY0 + wm: avoid.y += 1.0
+			elif fp.pos.y > FY1 - wm: avoid.y -= 1.0
+			if avoid != Vector2.ZERO:
+				ddir = (ddir + avoid.normalized() * 1.4).normalized()
 			dspeed = base_speed * 1.5
 			fp.stamina -= (0.8 if fp.is_star else 1.1) * dt
 			if fp.stamina <= 0:
@@ -537,15 +574,17 @@ func _complete_photo(fp: Dictionary) -> void:
 	flash_alpha = 1.0 if fp.is_star else 0.7
 	if fp.is_star: gold_flash = 1.0
 	shake = 10.0
-	_say(PHOTO_LINES[randi() % PHOTO_LINES.size()], Color("#ffd700") if fp.is_star else Color.WHITE)
+	_play_shutter()  # 咔嚓快门声
+	var lines: Array = GameConfig.STAR_PHOTO_LINES if fp.is_star else GameConfig.PHOTO_LINES
+	_say(lines[randi() % lines.size()], Color("#ffd700") if fp.is_star else Color.WHITE)
 	p_combo += 1
 	p_combo_timer = 180.0
 	p_riot = min(100.0, p_riot + (35.0 if fp.is_star else 18.0))
 	if p_riot >= 100 and not riot_active:
 		_trigger_riot()
 		p_riot = 0
-	if photographed % 10 == 0:
-		_say("已合影 %d 人！你已经是全场最靓的仔！" % photographed, Color("#ffd700"))
+	if photographed % GameConfig.MILESTONE_EVERY == 0:
+		_say(GameConfig.MILESTONE_TEMPLATE % photographed, Color("#ffd700"))
 	_check_upgrade()
 
 func _check_upgrade() -> void:
@@ -567,13 +606,14 @@ func _spawn_security(elite: bool) -> void:
 	security.append({
 		"pos": pos, "vel": Vector2.ZERO, "elite": elite, "radius": 13.0,
 		"state": "chase", "timer": 0.0, "lunge_dir": Vector2.ZERO, "lunge_cd": 0.0,
+		"flank": randf_range(-1.0, 1.0),  # 包抄偏移：让每个保安从不同角度逼近
 		"anim": "stand", "phase": 0.0,
 	})
 
 func _update_security(dt: float) -> void:
 	sec_spawn_timer -= dt
 	var speed_bonus := int((upgrades.speed_mult - 1.0) * 8)
-	var target_count := base_security + int(elapsed / 15.0) + int(score / 1000.0) + speed_bonus + int(photographed / 6.0)
+	var target_count: int = int(TUNE.base_security) + int(elapsed / 15.0) + int(score / 1000.0) + speed_bonus + int(photographed / 6.0)
 	if security.size() < min(target_count, 32) and sec_spawn_timer <= 0:
 		_spawn_security(elapsed > 60 and randf() < 0.3)
 		sec_spawn_timer = max(30.0, 90.0 - floor(elapsed / 10.0) - floor(photographed / 4.0))
@@ -597,11 +637,13 @@ func _update_security(dt: float) -> void:
 				s.state = "recover"
 				s.timer = LUNGE_RECOVER
 		elif s.state == "recover":
+			# 飞扑后定在原地一下（更明确的停顿），结束后换角度包抄
 			s.timer -= dt
-			s.vel *= 0.85
+			s.vel *= 0.6
 			if s.timer <= 0:
 				s.state = "chase"
 				s.lunge_cd = LUNGE_CD_AFTER
+				s.flank = randf_range(-1.0, 1.0)
 		else:
 			var target := p_pos
 			if riot_active and riot_npcs.size() > 0:
@@ -613,12 +655,26 @@ func _update_security(dt: float) -> void:
 				if nearest != null and nd < 260:
 					target = nearest.pos
 					chasing_decoy = true
+			# 包抄：远距离时瞄准玩家身侧偏移点（分散成弧形围堵），贴近时收回直扑
+			if not chasing_decoy:
+				var to_p: Vector2 = p_pos - s.pos
+				var fscale: float = clampf(to_p.length() / 220.0, 0.0, 1.0)
+				target = p_pos + to_p.orthogonal().normalized() * s.flank * 75.0 * fscale
 			var dir: Vector2 = (target - s.pos).normalized()
 			if s.elite and not chasing_decoy:
 				dir = (p_pos + p_vel * 8.0 - s.pos).normalized()
 			var ratio: float = TUNE.sec_ratio_elite if s.elite else TUNE.sec_ratio
 			var accel: float = TUNE.security_accel_elite if s.elite else TUNE.security_accel
-			var target_vel: Vector2 = dir * pcur * ratio
+			# 分离力：保安互相排斥，避免挤在一条路上让玩家一次甩开整团
+			var sep := Vector2.ZERO
+			var sep_radius: float = TUNE.sec_separation_radius
+			for o in security:
+				if is_same(o, s): continue
+				var dd: Vector2 = s.pos - o.pos
+				var dl: float = dd.length()
+				if dl < sep_radius and dl > 0.01:
+					sep += (dd / dl) * (1.0 - dl / sep_radius)
+			var target_vel: Vector2 = dir * pcur * ratio + sep * (pcur * float(TUNE.sec_separation_force))
 			s.vel += (target_vel - s.vel) * accel * dt
 			var dpl: float = s.pos.distance_to(p_pos)
 			if not chasing_decoy and not p_rolling and dpl < LUNGE_RANGE and s.lunge_cd <= 0:
@@ -694,7 +750,7 @@ func _update_chants(dt: float) -> void:
 	if chant_timer <= 0:
 		chant_timer = 90.0 + randf() * 120.0
 		var top := randf() < 0.5
-		chants.append({"pos": Vector2(randf() * WORLD.x, -40.0 if top else WORLD.y + 50), "text": CHANT_TEXTS[randi() % CHANT_TEXTS.size()], "life": 90.0})
+		chants.append({"pos": Vector2(randf() * WORLD.x, -40.0 if top else WORLD.y + 50), "text": GameConfig.CHANT_TEXTS[randi() % GameConfig.CHANT_TEXTS.size()], "life": 90.0})
 	for i in range(chants.size() - 1, -1, -1):
 		chants[i].life -= dt
 		chants[i].pos.y -= dt * 0.3
@@ -1168,7 +1224,7 @@ func _say(text: String, color: Color) -> void:
 # ----------------------------------------------------------------------------
 func _start_game() -> void:
 	score = 0; elapsed = 0; photographed = 0; next_upgrade_at = 1000
-	upgrades = {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": 5.0, "photo_radius": 1.0}
+	upgrades = {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": float(TUNE.roll_cost), "photo_radius": 1.0}
 	up_levels = {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0}
 	p_pos = Vector2(WORLD.x / 2, FY1 - 6)
 	p_vel = Vector2.ZERO
@@ -1178,7 +1234,7 @@ func _start_game() -> void:
 	p_anim = "stand"; p_phase = 0
 	_spawn_players()
 	security.clear()
-	for i in range(base_security): _spawn_security(false)
+	for i in range(int(TUNE.base_security)): _spawn_security(false)
 	riot_npcs.clear(); riot_active = false
 	confetti.clear(); flashes.clear(); chants.clear()
 	shake = 0; flash_alpha = 0; gold_flash = 0
@@ -1189,11 +1245,11 @@ func _start_game() -> void:
 	panel_upgrade.visible = false
 	_update_levels()
 	state = St.PLAY
-	_say(OPENING_LINE, Color.WHITE)
+	_say(GameConfig.OPENING_LINE, Color.WHITE)
 
 func _game_over() -> void:
 	state = St.OVER
-	lbl_over_title.text = "被保安逮捕了！"
+	lbl_over_title.text = GameConfig.ARREST_TITLE
 	lbl_over_stats.text = "得分：%d\n合影人数：%d\n存活时间：%s" % [score, photographed, _fmt_time(elapsed)]
 	panel_over.visible = true
 
