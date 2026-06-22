@@ -756,6 +756,10 @@ func _complete_photo(fp: Dictionary) -> void:
 	fp.fleeing = false
 	fp.dir = _nearest_edge_dir(fp.pos)
 	photographed += 1
+	# 调试：开了无敌时，刷满 22 人后自动解除无敌，方便测试胜利结算
+	if god_mode and photographed >= GameConfig.WIN_GOAL:
+		god_mode = false
+		_say("【调试】已合影 %d 人，无敌解除——去触发胜利吧！" % photographed, Color("#ff6b6b"))
 	var base: int = 400 if fp.is_star else 150
 	var mult := 2 if fp.chased else 1
 	score += base * mult
@@ -1728,6 +1732,7 @@ func _say(text: String, color: Color) -> void:
 func _start_game() -> void:
 	score = 0; elapsed = 0; photographed = 0; next_upgrade_at = 1000
 	won = false
+	god_mode = GameConfig.DEBUG.god_mode  # 每局重新按配置应用无敌（满22人后会自动解除）
 	upgrades = {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": float(TUNE.roll_cost), "photo_radius": 1.0}
 	up_levels = {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0}
 	p_pos = Vector2(WORLD.x / 2, FY1 - 6)
