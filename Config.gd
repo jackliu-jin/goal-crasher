@@ -71,12 +71,15 @@ const MASCOT_QUIPS := [
 	"吉祥物：你礼貌吗",
 ]
 
+# 开始页：目标号召文案
+const START_GOAL := "合照满 22 张，领取你专属的 WORLD CRASHER CUP！\nRUN FOR IT! GO! GO!"
+
 # 抓满 22 人后被抓 = 胜利
 const WIN_GOAL := 22
 const WIN_TITLE := "WIN! 你就是真正的冲场之王！"
 const WIN_SUB := "ohhhhhhhhhhh"
 const WIN_HINT := "截图分享吧！"
-const SHARE_HINT := "扫码分享给朋友 →"
+const SHARE_HINT := "扫码分享给小伙伴"
 
 # 看台助威字幕
 const CHANT_TEXTS := ["OLE OLE!", "VAMOS!","我爱C罗！","我爱梅西！", "一起合影!", "MESSI!", "加油!", "CR7!","jajajajaja","OMG!","WTF!","我也想合影","我要下去了！","WATCH OUT!"]

@@ -1612,6 +1612,10 @@ func _build_panels() -> void:
 	desc.custom_minimum_size = Vector2(620, 0)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(desc)
+	var goal := _mk_label(GameConfig.START_GOAL, 22, Color("#ffd24a"))
+	goal.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	goal.add_theme_constant_override("outline_size", 6)
+	v.add_child(goal)
 	var tip := _mk_label("📱 建议横屏游玩", 20, Color("#9fe0ff"))
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(tip)
