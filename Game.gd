@@ -1601,7 +1601,7 @@ func _build_panels() -> void:
 	panel_start = _overlay()
 	var v := _center_box()
 	panel_start.add_child(v)
-	v.add_child(_mk_label("Pitch Invader: World Cup Craze", 30, Color("#ffd700")))
+	v.add_child(_mk_label("Goal Crasher 冲场之王", 30, Color("#ffd700")))
 	# 加粗强调行（Zpix 像素字体无独立粗体，用更大字号 + 更粗描边模拟"加粗"）
 	var emph := _mk_label("挑战更多的合影！更多的疯狂！", 24, Color("#ffd700"))
 	emph.add_theme_constant_override("outline_size", 7)
