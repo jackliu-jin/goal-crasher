@@ -125,6 +125,7 @@ var cam: Camera2D
 var ui: CanvasLayer
 var shutter_player: AudioStreamPlayer
 var bgm_player: AudioStreamPlayer
+var cheer_player: AudioStreamPlayer
 var lbl_score: Label
 var lbl_info: Label
 var lbl_levels: Label
@@ -258,16 +259,92 @@ func _setup_environment() -> void:
 # 音效：程序化合成相机"咔嚓"快门声（无需音频素材）
 # ----------------------------------------------------------------------------
 func _setup_audio() -> void:
+	# 相机快门（合影时）——优先用真实音频，缺失时回退到合成音。音量改这一行↓
 	shutter_player = AudioStreamPlayer.new()
-	shutter_player.stream = _make_shutter_wav()
-	shutter_player.volume_db = -10.0
+	var cam_s: AudioStream = _load_audio_dat("res://camera.wav.dat", "wav")
+	shutter_player.stream = cam_s if cam_s != null else _make_shutter_wav()
+	shutter_player.volume_db = -4.0
 	shutter_player.max_polyphony = 5  # 连拍时允许叠加
 	add_child(shutter_player)
-	# 背景：魔性洗脑的球场欢呼/口号 BGM（循环）
+
+	# 背景音乐 BGM（循环）。音量改这一行↓
 	bgm_player = AudioStreamPlayer.new()
-	bgm_player.stream = _make_chant_bgm()
-	bgm_player.volume_db = -27.0  # 比之前 -11dB 再降约一半响度
+	var bgm_s: AudioStream = _load_audio_dat("res://bgm.ogg.dat", "ogg")
+	if bgm_s != null:
+		_set_loop(bgm_s, true)
+		bgm_player.stream = bgm_s
+	else:
+		bgm_player.stream = _make_chant_bgm()
+	bgm_player.volume_db = -8.0
 	add_child(bgm_player)
+
+	# 人群欢呼（循环背景氛围声）。音量改这一行↓
+	cheer_player = AudioStreamPlayer.new()
+	var cheer_s: AudioStream = _load_audio_dat("res://cheer.mp3.dat", "mp3")
+	if cheer_s != null:
+		_set_loop(cheer_s, true)
+		cheer_player.stream = cheer_s
+	cheer_player.volume_db = -10.0
+	add_child(cheer_player)
+
+# 从打包的原始字节文件加载音频（绕开导入系统，确保 web 构建一定包含）
+func _load_audio_dat(path: String, kind: String) -> AudioStream:
+	if not FileAccess.file_exists(path):
+		return null
+	var fa := FileAccess.open(path, FileAccess.READ)
+	if fa == null:
+		return null
+	var bytes := fa.get_buffer(fa.get_length())
+	fa.close()
+	if bytes.size() < 32:
+		return null
+	match kind:
+		"ogg":
+			return AudioStreamOggVorbis.load_from_buffer(bytes)
+		"mp3":
+			var m := AudioStreamMP3.new()
+			m.data = bytes
+			return m
+		"wav":
+			return _wav_from_bytes(bytes)
+	return null
+
+# 手动解析标准 PCM WAV（只用基础 PackedByteArray API，任何 4.x 都可靠）
+func _wav_from_bytes(bytes: PackedByteArray) -> AudioStreamWAV:
+	if bytes.size() < 44:
+		return null
+	var channels := 1
+	var sample_rate := 44100
+	var bits := 16
+	var pcm := PackedByteArray()
+	var pos := 12  # 跳过 "RIFF"<size>"WAVE"
+	while pos + 8 <= bytes.size():
+		var cid: String = bytes.slice(pos, pos + 4).get_string_from_ascii()
+		var csize: int = bytes.decode_u32(pos + 4)
+		var body := pos + 8
+		if cid == "fmt ":
+			channels = bytes.decode_u16(body + 2)
+			sample_rate = bytes.decode_u32(body + 4)
+			bits = bytes.decode_u16(body + 14)
+		elif cid == "data":
+			pcm = bytes.slice(body, min(body + csize, bytes.size()))
+		pos = body + csize + (csize & 1)  # 块按偶数对齐
+	if pcm.size() == 0:
+		return null
+	var w := AudioStreamWAV.new()
+	w.format = AudioStreamWAV.FORMAT_8_BITS if bits == 8 else AudioStreamWAV.FORMAT_16_BITS
+	w.mix_rate = sample_rate
+	w.stereo = channels >= 2
+	w.data = pcm
+	return w
+
+func _set_loop(s: AudioStream, on: bool) -> void:
+	if s is AudioStreamOggVorbis:
+		(s as AudioStreamOggVorbis).loop = on
+	elif s is AudioStreamMP3:
+		(s as AudioStreamMP3).loop = on
+	elif s is AudioStreamWAV:
+		(s as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_FORWARD if on else AudioStreamWAV.LOOP_DISABLED
 
 # 程序化合成一段循环的球场口号动机（人群"oh-oh-oh"+底噪），魔性洗脑
 func _make_chant_bgm() -> AudioStreamWAV:
@@ -319,8 +396,12 @@ func _make_chant_bgm() -> AudioStreamWAV:
 	return wav
 
 func _play_bgm() -> void:
-	if bgm_player != null and not bgm_player.playing and not GameConfig.DEBUG.mute_audio:
+	if GameConfig.DEBUG.mute_audio:
+		return
+	if bgm_player != null and not bgm_player.playing:
 		bgm_player.play()
+	if cheer_player != null and cheer_player.stream != null and not cheer_player.playing:
+		cheer_player.play()
 
 func _make_shutter_wav() -> AudioStreamWAV:
 	var rate := 22050
