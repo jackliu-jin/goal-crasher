@@ -1075,11 +1075,7 @@ func _draw() -> void:
 	if state == St.MENU:
 		_draw_pitch()
 		return
-	if state == St.OVER and won:
-		# 胜利画面：干净的球场 + 漫天彩带
-		_draw_pitch()
-		_draw_confetti()
-		return
+	# 胜利画面：保留被捕前的整幅画面（全员一起跳舞，见各 draw 里的 win-dance）
 	_draw_pitch()
 	_draw_footballers()
 	_draw_riot()
@@ -1098,6 +1094,14 @@ func _hop(e) -> float:
 	var phase: float = e.phase if e is Dictionary else p_phase
 	if anim == "stand": return 0.0
 	return -abs(sin(phase * 0.35)) * 3.2
+
+# 胜利庆祝：全员一起蹦跳
+func _win_dancing() -> bool:
+	return state == St.OVER and won
+func _dance_bob(phase: float) -> float:
+	return -absf(sin(Time.get_ticks_msec() * 0.012 + phase)) * 6.0
+func _dance_frame(phase: float) -> String:
+	return "a" if int(Time.get_ticks_msec() * 0.006 + phase) % 2 == 0 else "b"
 
 func _draw_pitch() -> void:
 	# 看台底
@@ -1175,9 +1179,10 @@ func _draw_footballers() -> void:
 			key = "porStar" if fp.is_star else "porCommon"
 		var w: float = 30.0 if fp.is_star else 24.0
 		var h: float = 44.0 if fp.is_star else 36.0
-		var bob := _hop(fp)
+		var bob := _dance_bob(float(fp.phase)) if _win_dancing() else _hop(fp)
+		var frame: String = _dance_frame(float(fp.phase)) if _win_dancing() else fp.anim
 		var mod := Color(1, 1, 1, 0.7) if fp.leaving else Color.WHITE
-		_draw_sprite(SPRITES[key][fp.anim], fp.pos, w, h, fp.dir.x < -0.1, bob, mod)
+		_draw_sprite(SPRITES[key][frame], fp.pos, w, h, fp.dir.x < -0.1, bob, mod)
 		draw_string(font, fp.pos + Vector2(-5, -2 + bob), str(fp.number), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.WHITE)
 		if fp.is_star:
 			draw_arc(fp.pos + Vector2(0, -4 + bob), 20, 0, TAU, 20, Color("#ffd700"), 2.0)
@@ -1212,14 +1217,29 @@ func _draw_security() -> void:
 		elif s.state == "recover":
 			alpha = 0.55
 		var key: String = "guardElite" if s.elite else "guard"
-		var bob := _hop(s) if s.state == "chase" else 0.0
-		_draw_sprite(SPRITES[key][s.anim], s.pos, 26 * scale, 38 * scale, s.vel.x < -0.1, bob, Color(1, 1, 1, alpha))
+		var bob := _dance_bob(float(s.phase)) if _win_dancing() else (_hop(s) if s.state == "chase" else 0.0)
+		var frame: String = _dance_frame(float(s.phase)) if _win_dancing() else s.anim
+		_draw_sprite(SPRITES[key][frame], s.pos, 26 * scale, 38 * scale, s.vel.x < -0.1, bob, Color(1, 1, 1, alpha))
 		if s.elite:
 			draw_string(font, s.pos + Vector2(-6, -32), "★", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#ffd700"))
 
 func _draw_riot() -> void:
 	for r in riot_npcs:
-		_draw_sprite(SPRITES["riot"][r.anim], r.pos, 22, 34, r.dir.x < -0.1, _hop(r))
+		var bob := _dance_bob(float(r.phase)) if _win_dancing() else _hop(r)
+		var frame: String = _dance_frame(float(r.phase)) if _win_dancing() else r.anim
+		_draw_sprite(SPRITES["riot"][frame], r.pos, 22, 34, r.dir.x < -0.1, bob)
+
+const MPIX := 4.0   # 吉祥物的"像素"块大小，使其与其他角色像素风一致
+func _pr(x: float, y: float, w: float, h: float, col: Color) -> void:
+	draw_rect(Rect2(round(x / MPIX) * MPIX, round(y / MPIX) * MPIX, round(w / MPIX) * MPIX, round(h / MPIX) * MPIX), col)
+func _ptri_up(cx: float, base_y: float, half: float, steps: int, col: Color) -> void:   # 尖朝上的像素三角
+	for i in range(steps):
+		var hw := half * (1.0 - float(i) / float(steps))
+		_pr(cx - hw, base_y - float(i + 1) * MPIX, hw * 2.0, MPIX, col)
+func _ptri_down(cx: float, top_y: float, half: float, steps: int, col: Color) -> void: # 尖朝下的像素三角
+	for i in range(steps):
+		var hw := half * (1.0 - float(i) / float(steps))
+		_pr(cx - hw, top_y + float(i) * MPIX, hw * 2.0, MPIX, col)
 
 func _draw_mascots() -> void:
 	var t := Time.get_ticks_msec()
@@ -1228,90 +1248,85 @@ func _draw_mascots() -> void:
 		var jersey: Color = m.jersey
 		var fur: Color = m.fur
 		var boot: Color = m.boot
-		var dark := Color(fur.r * 0.55, fur.g * 0.55, fur.b * 0.55)
-		# 预警 / 休息提示
+		var dark := Color(fur.r * 0.5, fur.g * 0.5, fur.b * 0.5)
+		var jdark := Color(jersey.r * 0.7, jersey.g * 0.7, jersey.b * 0.7)
+		# 冲锋前的瞄准预警线
 		if m.state == "aim":
 			var aimdir: Vector2 = (p_pos - m.pos).normalized()
 			var pulse := 0.45 + 0.4 * sin(t * 0.03)
 			draw_line(c + Vector2(0, -28), c + Vector2(0, -28) + aimdir * 1100.0, Color(1.0, 0.2, 0.2, pulse), 5.0)
-			draw_arc(c, MASCOT_RADIUS + 10.0, 0, TAU, 26, Color(1, 0.3, 0.3, pulse), 3.0)
-		elif m.state == "rest":
-			draw_arc(c, MASCOT_RADIUS + 6.0, 0, TAU, 26, Color(0.75, 0.75, 0.75, 0.35), 2.0)
-		# 落地软阴影
-		draw_circle(c + Vector2(0, -3), 20, Color(0, 0, 0, 0.16))
-		var bob := 0.0
-		var sway := 0.0
-		if m.state == "charge":
-			bob = -abs(sin(t * 0.02 + float(m.phase))) * 4.0
+		# 跳跃 / 跳舞偏移
+		var ox := 0.0
+		var oy := 0.0
+		if _win_dancing():
+			oy = _dance_bob(float(m.phase)); ox = sin(t * 0.01 + float(m.phase)) * 8.0
+		elif m.state == "charge":
+			oy = -abs(sin(t * 0.02 + float(m.phase))) * 4.0
 		elif m.state == "idle":
-			# 待机跳舞：上下蹦 + 左右摇摆
-			bob = -abs(sin(t * 0.011 + float(m.phase))) * 9.0
-			sway = sin(t * 0.006 + float(m.phase)) * 7.0
-		var off := Vector2(sway, bob)
+			oy = -abs(sin(t * 0.011 + float(m.phase))) * 9.0
+			ox = sin(t * 0.006 + float(m.phase)) * 7.0
+		# 像素阴影
+		_pr(c.x - 18, c.y - 6, 36, 6, Color(0, 0, 0, 0.16))
 		# 腿
-		for sgn in [-1.0, 1.0]:
-			draw_line(c + Vector2(sgn * 8, -17) + off, c + Vector2(sgn * 8, -3), boot, 7.0)
-		# 身体（球衣）——方正一点，少弧度
-		var body: Vector2 = c + Vector2(0, -32) + off
-		var jdark := Color(jersey.r * 0.7, jersey.g * 0.7, jersey.b * 0.7)
-		draw_rect(Rect2(body.x - 17, body.y - 17, 34, 35), jersey)
-		draw_rect(Rect2(body.x - 17, body.y - 17, 34, 35), jdark, false, 2.0)
-		# 手（方块小手）
-		for sgn in [-1.0, 1.0]:
-			draw_rect(Rect2(body.x + sgn * 17 - 6, body.y - 5, 12, 12), fur)
+		_pr(c.x + ox - 11, c.y + oy - 18, 8, 16, boot)
+		_pr(c.x + ox + 3, c.y + oy - 18, 8, 16, boot)
+		# 身体 + 描边
+		var bx := c.x + ox - 16
+		var by := c.y + oy - 50
+		_pr(bx, by, 32, 34, jersey)
+		_pr(bx, by, 32, 4, jdark); _pr(bx, by + 30, 32, 4, jdark)
+		_pr(bx, by, 4, 34, jdark); _pr(bx + 28, by, 4, 34, jdark)
+		# 手
+		_pr(bx - 10, by + 8, 12, 12, fur)
+		_pr(bx + 30, by + 8, 12, 12, fur)
 		# 头
-		var head: Vector2 = c + Vector2(0, -57) + off
-		var hr := 21.0
-		# —— 头部后方特征（角 / 耳）——
+		var hx := c.x + ox
+		var hy := c.y + oy - 58
+		var hr := 20.0
+		# 头后特征（角 / 耳 / 冠）
 		match m.type:
 			"moose":
 				var ac := Color("#efe2c2")
 				for sgn in [-1.0, 1.0]:
-					var b0 := head + Vector2(sgn * 7, -hr * 0.7)
-					var b1 := b0 + Vector2(sgn * 12, -10)
-					draw_line(b0, b1, ac, 4.0)
-					draw_line(b1, b1 + Vector2(sgn * 11, -3), ac, 4.0)
-					draw_line(b1, b1 + Vector2(sgn * 3, -12), ac, 4.0)
-					draw_line(b1 + Vector2(sgn * 6, -2), b1 + Vector2(sgn * 13, -9), ac, 4.0)
+					var axx := hx + sgn * 10
+					var ayy := hy - hr
+					_pr(axx - 2, ayy - 18, 4, 18, ac)
+					_pr(axx + sgn * 6 - 2, ayy - 18, 10, 4, ac)
+					_pr(axx + sgn * 12 - 2, ayy - 26, 4, 10, ac)
 			"jaguar":
 				for sgn in [-1.0, 1.0]:
-					var ear := PackedVector2Array([
-						head + Vector2(sgn * 9, -hr * 0.75),
-						head + Vector2(sgn * 20, -hr * 1.05),
-						head + Vector2(sgn * 20, -hr * 0.55)])
-					draw_colored_polygon(ear, fur)
-					draw_circle(head + Vector2(sgn * 16, -hr * 0.8), 3.0, Color("#7a4a8a"))
+					_ptri_up(hx + sgn * 13, hy - hr + 4, 8.0, 3, fur)
 			"eagle":
-				# 头冠羽毛
-				draw_colored_polygon(PackedVector2Array([
-					head + Vector2(-6, -hr * 0.9), head + Vector2(6, -hr * 0.9), head + Vector2(0, -hr * 1.4)]), fur)
-		# 头主体——方脸
-		draw_rect(Rect2(head.x - hr, head.y - hr, hr * 2.0, hr * 2.0), fur)
-		draw_rect(Rect2(head.x - hr, head.y - hr, hr * 2.0, hr * 2.0), dark, false, 2.0)
-		# 大眼睛（萌）：白底 + 朝玩家看的瞳孔
-		var look: Vector2 = (p_pos - head).normalized() * 2.4
+				_ptri_up(hx, hy - hr + 4, 8.0, 3, fur)
+		# 方脸 + 描边
+		_pr(hx - hr, hy - hr, hr * 2.0, hr * 2.0, fur)
+		_pr(hx - hr, hy - hr, hr * 2.0, 4, dark); _pr(hx - hr, hy + hr - 4, hr * 2.0, 4, dark)
+		_pr(hx - hr, hy - hr, 4, hr * 2.0, dark); _pr(hx + hr - 4, hy - hr, 4, hr * 2.0, dark)
+		# 像素大眼（瞳孔朝玩家方向偏移一格）
+		var look: Vector2 = (p_pos - Vector2(hx, hy)).normalized()
+		var lx := 4.0 if look.x > 0.2 else (-4.0 if look.x < -0.2 else 0.0)
 		for sgn in [-1.0, 1.0]:
-			var eye := head + Vector2(sgn * 8, -2)
-			draw_circle(eye, 6.6, Color.WHITE)
-			draw_circle(eye + look, 3.4, Color(0.08, 0.08, 0.08))
-			draw_circle(eye + look + Vector2(-1, -1), 1.1, Color.WHITE)  # 高光
-		# —— 头部前方特征（鼻 / 喙 / 斑点）——
+			var ex := hx + sgn * 8
+			var ey := hy - 2
+			_pr(ex - 6, ey - 6, 12, 12, Color.WHITE)
+			_pr(ex - 2 + lx, ey - 2, 4, 6, Color(0.08, 0.08, 0.08))
+		# 头前特征（鼻 / 喙 / 斑点）
 		match m.type:
 			"moose":
-				draw_circle(head + Vector2(0, hr * 0.55), 6.0, Color("#8a5a3a"))  # 大鼻头
+				_pr(hx - 6, hy + 8, 12, 8, Color("#8a5a3a"))
 			"jaguar":
-				draw_colored_polygon(PackedVector2Array([
-					head + Vector2(-3, hr * 0.5), head + Vector2(3, hr * 0.5), head + Vector2(0, hr * 0.72)]), Color("#5a3a2a"))
-				for sp in [Vector2(-12, -8), Vector2(11, -6), Vector2(-9, 6), Vector2(10, 7)]:
-					draw_circle(head + sp * 0.9, 2.0, dark)
+				_ptri_down(hx, hy + 8, 4.0, 2, Color("#5a3a2a"))
+				_pr(hx - 14, hy - 10, 4, 4, dark); _pr(hx + 10, hy - 8, 4, 4, dark)
+				_pr(hx - 12, hy + 4, 4, 4, dark); _pr(hx + 8, hy + 6, 4, 4, dark)
 			"eagle":
-				draw_colored_polygon(PackedVector2Array([
-					head + Vector2(-6, hr * 0.35), head + Vector2(6, hr * 0.35), head + Vector2(0, hr * 0.8)]), Color("#ffb83a"))
-		# 名字（头顶上方）
-		draw_string(font, c + Vector2(-34, -100), m.label, HORIZONTAL_ALIGNMENT_CENTER, 68, 18, m.name_col)
+				_ptri_down(hx, hy + 6, 6.0, 3, Color("#ffb83a"))
+		# 名字
+		draw_string(font, c + Vector2(-34 + ox, -100 + oy), m.label, HORIZONTAL_ALIGNMENT_CENTER, 68, 18, m.name_col)
 
 func _draw_player() -> void:
-	_draw_sprite(SPRITES["fan"][p_anim], p_pos, 28, 42, p_face.x < -0.1, 0.0 if p_rolling else _hop(self))
+	var p_frame: String = _dance_frame(p_phase) if _win_dancing() else p_anim
+	var p_bob: float = _dance_bob(p_phase) if _win_dancing() else (0.0 if p_rolling else _hop(self))
+	_draw_sprite(SPRITES["fan"][p_frame], p_pos, 28, 42, p_face.x < -0.1, p_bob)
 	# 头顶体力槽
 	var w := 40.0; var h := 5.0
 	var y := p_pos.y - (p_radius + 16)
