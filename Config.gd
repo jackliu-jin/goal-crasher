@@ -79,14 +79,15 @@ static func default_tune() -> Dictionary:
 		"common_stamina": 55.0,
 		# —— 保安 ——
 		"base_security": 5,         # 初始保安数量
-		"max_security": 42,         # 场上保安数量上限
+		"max_security": 60,         # 场上保安数量上限
 		"sec_spawn_interval_mult": 1.5,  # 保安生成间隔倍率（越大刷得越慢；1.5 = 比原来慢一半）
-		"sec_separation_radius": 50.0,  # 保安互斥半径（避免重叠走同一条路）
+		"sec_separation_radius": 70.0,  # 保安互斥半径（避免重叠走同一条路）
 		"sec_separation_force": 0.9,    # 互斥强度
 		# —— 翻滚 ——
 		"roll_cost": 10.0,          # 翻滚体力消耗（之前 5，翻倍）
 		"roll_speed": 7.5,          # 翻滚速度（缩短距离）
 		"roll_duration": 12.0,      # 翻滚持续帧（缩短距离）
 		# —— 吉祥物 mini-boss ——
-		"mascot_speed_mult": 4.0,   # 吉祥物冲锋速度 = 主角速度 × 此倍率
+		# 每只吉祥物各自的速度倍率/休息见 Game.gd 的 MASCOT_DEFS；下面是叠加在其上的全局倍率
+		"mascot_speed_mult": 1.0,   # 全局倍率（1.0 = 用各自倍率 5/6/7 倍）
 	}

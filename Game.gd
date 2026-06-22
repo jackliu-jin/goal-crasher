@@ -110,13 +110,13 @@ var riot_timer := 0.0
 var mascots: Array = []
 var mascot_spawn_idx := 0
 const MASCOT_DEFS := [
-	{"type": "moose",  "label": "红麋鹿", "name_col": "#ff7a4a", "jersey": "#d23b2a", "fur": "#c98a5a", "boot": "#3a2a1a"},
-	{"type": "jaguar", "label": "绿猎豹", "name_col": "#6ee07a", "jersey": "#2e8b3d", "fur": "#e0a838", "boot": "#222222"},
-	{"type": "eagle",  "label": "蓝鹰",   "name_col": "#74a0ff", "jersey": "#2546c8", "fur": "#f4f4f4", "boot": "#444444"},
+	# 第1只：5倍速、休息5秒；第2只：6倍速、休息4秒；第3只：7倍速、休息3秒
+	{"type": "moose",  "label": "红麋鹿", "name_col": "#ff7a4a", "jersey": "#d23b2a", "fur": "#c98a5a", "boot": "#3a2a1a", "speed_mult": 5.0, "rest": 300.0},
+	{"type": "jaguar", "label": "绿猎豹", "name_col": "#6ee07a", "jersey": "#2e8b3d", "fur": "#e0a838", "boot": "#222222", "speed_mult": 6.0, "rest": 240.0},
+	{"type": "eagle",  "label": "蓝鹰",   "name_col": "#74a0ff", "jersey": "#2546c8", "fur": "#f4f4f4", "boot": "#444444", "speed_mult": 7.0, "rest": 180.0},
 ]
-const MASCOT_TIMES := [3600.0, 7200.0, 10800.0]  # 1/2/3 分钟（帧）
+const MASCOT_TIMES := [1800.0, 3600.0, 5400.0]  # 30 / 60 / 90 秒（帧）
 const MASCOT_AIM := 32.0       # 冲锋前的瞄准预警（约 0.5s）
-const MASCOT_REST := 300.0     # 贯穿后在边线休息 5 秒
 const MASCOT_RADIUS := 26.0    # 普通保安(13)的两倍
 const MASCOT_SCATTER := 60.0   # 冲锋时冲散保安的半径
 
@@ -929,6 +929,7 @@ func _spawn_mascot(def: Dictionary) -> void:
 		"type": def.type, "label": def.label,
 		"name_col": Color(def.name_col), "jersey": Color(def.jersey),
 		"fur": Color(def.fur), "boot": Color(def.boot),
+		"speed_mult": float(def.speed_mult), "rest": float(def.rest),
 		"pos": pos, "dir": Vector2.ZERO, "speed": 0.0,
 		"state": "aim", "timer": MASCOT_AIM, "phase": randf() * TAU,
 	}
@@ -938,7 +939,8 @@ func _launch_mascot_charge(m: Dictionary) -> void:
 	m.dir = (p_pos - m.pos).normalized()       # 锁定玩家当前瞬时位置
 	if m.dir.length() < 0.01:
 		m.dir = Vector2(0, -1)
-	m.speed = TUNE.player_base_speed * upgrades.speed_mult * float(TUNE.mascot_speed_mult)  # 主角速度 × 倍率
+	# 主角速度 × 该吉祥物各自倍率(5/6/7) × 全局倍率
+	m.speed = TUNE.player_base_speed * upgrades.speed_mult * float(m.speed_mult) * float(TUNE.mascot_speed_mult)
 	m.state = "charge"
 
 func _update_mascots(dt: float) -> void:
@@ -970,7 +972,7 @@ func _update_mascots(dt: float) -> void:
 				if m.pos.x < -70 or m.pos.x > WORLD.x + 70 or m.pos.y < -70 or m.pos.y > WORLD.y + 70:
 					m.pos = Vector2(clampf(m.pos.x, 0, WORLD.x), clampf(m.pos.y, 0, WORLD.y))
 					m.state = "rest"
-					m.timer = MASCOT_REST
+					m.timer = float(m.rest)
 				elif not p_rolling and not god_mode and m.pos.distance_to(p_pos) < MASCOT_RADIUS + p_radius:
 					_game_over()
 					return
@@ -1199,12 +1201,14 @@ func _draw_mascots() -> void:
 		# 腿
 		for sgn in [-1.0, 1.0]:
 			draw_line(c + Vector2(sgn * 8, -17) + off, c + Vector2(sgn * 8, -3), boot, 7.0)
-		# 身体（球衣）
+		# 身体（球衣）——方正一点，少弧度
 		var body: Vector2 = c + Vector2(0, -32) + off
-		draw_circle(body, 18, jersey)
-		# 手
+		var jdark := Color(jersey.r * 0.7, jersey.g * 0.7, jersey.b * 0.7)
+		draw_rect(Rect2(body.x - 17, body.y - 17, 34, 35), jersey)
+		draw_rect(Rect2(body.x - 17, body.y - 17, 34, 35), jdark, false, 2.0)
+		# 手（方块小手）
 		for sgn in [-1.0, 1.0]:
-			draw_circle(body + Vector2(sgn * 17, 1), 6.5, fur)
+			draw_rect(Rect2(body.x + sgn * 17 - 6, body.y - 5, 12, 12), fur)
 		# 头
 		var head: Vector2 = c + Vector2(0, -57) + off
 		var hr := 21.0
@@ -1231,8 +1235,9 @@ func _draw_mascots() -> void:
 				# 头冠羽毛
 				draw_colored_polygon(PackedVector2Array([
 					head + Vector2(-6, -hr * 0.9), head + Vector2(6, -hr * 0.9), head + Vector2(0, -hr * 1.4)]), fur)
-		# 头主体
-		draw_circle(head, hr, fur)
+		# 头主体——方脸
+		draw_rect(Rect2(head.x - hr, head.y - hr, hr * 2.0, hr * 2.0), fur)
+		draw_rect(Rect2(head.x - hr, head.y - hr, hr * 2.0, hr * 2.0), dark, false, 2.0)
 		# 大眼睛（萌）：白底 + 朝玩家看的瞳孔
 		var look: Vector2 = (p_pos - head).normalized() * 2.4
 		for sgn in [-1.0, 1.0]:
