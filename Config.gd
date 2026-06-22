@@ -87,4 +87,6 @@ static func default_tune() -> Dictionary:
 		"roll_cost": 10.0,          # 翻滚体力消耗（之前 5，翻倍）
 		"roll_speed": 7.5,          # 翻滚速度（缩短距离）
 		"roll_duration": 12.0,      # 翻滚持续帧（缩短距离）
+		# —— 吉祥物 mini-boss ——
+		"mascot_speed_mult": 4.0,   # 吉祥物冲锋速度 = 主角速度 × 此倍率
 	}

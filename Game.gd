@@ -110,14 +110,15 @@ var riot_timer := 0.0
 var mascots: Array = []
 var mascot_spawn_idx := 0
 const MASCOT_DEFS := [
-	{"type": "moose",  "sprite": "mascot_moose",  "label": "红麋鹿", "color": "#ff5a4a"},
-	{"type": "jaguar", "sprite": "mascot_jaguar", "label": "绿猎豹", "color": "#5ad36a"},
-	{"type": "eagle",  "sprite": "mascot_eagle",  "label": "蓝鹰",   "color": "#5a8cff"},
+	{"type": "moose",  "label": "红麋鹿", "name_col": "#ff7a4a", "jersey": "#d23b2a", "fur": "#c98a5a", "boot": "#3a2a1a"},
+	{"type": "jaguar", "label": "绿猎豹", "name_col": "#6ee07a", "jersey": "#2e8b3d", "fur": "#e0a838", "boot": "#222222"},
+	{"type": "eagle",  "label": "蓝鹰",   "name_col": "#74a0ff", "jersey": "#2546c8", "fur": "#f4f4f4", "boot": "#444444"},
 ]
 const MASCOT_TIMES := [3600.0, 7200.0, 10800.0]  # 1/2/3 分钟（帧）
 const MASCOT_AIM := 32.0       # 冲锋前的瞄准预警（约 0.5s）
-const MASCOT_REST := 600.0     # 贯穿后在边线休息 10 秒
+const MASCOT_REST := 300.0     # 贯穿后在边线休息 5 秒
 const MASCOT_RADIUS := 26.0    # 普通保安(13)的两倍
+const MASCOT_SCATTER := 60.0   # 冲锋时冲散保安的半径
 
 # 表现层
 var shake := 0.0
@@ -228,10 +229,7 @@ func _build_sprites() -> void:
 	SPRITES["guard"] = _char_set({"h": Color("#000000"), "k": Color("#caa07a"), "1": Color("#222831"), "2": Color("#11151a"), "b": Color("#000000")})
 	SPRITES["guardElite"] = _char_set({"h": Color("#1a0033"), "k": Color("#caa07a"), "1": Color("#4a148c"), "2": Color("#7b1fa2"), "b": Color("#000000")})
 	SPRITES["riot"] = _char_set({"h": Color("#333333"), "k": Color("#ffccaa"), "1": Color("#69f0ae"), "2": Color("#2e7d32"), "b": Color("#111111")})
-	# 三个世界杯吉祥物（红麋鹿 / 绿猎豹 / 蓝白头鹰），身体用各自队色，头部特征另行绘制
-	SPRITES["mascot_moose"]  = _char_set({"h": Color("#7a4a2a"), "k": Color("#caa07a"), "1": Color("#d23b2a"), "2": Color("#d23b2a"), "b": Color("#3a2a1a")})
-	SPRITES["mascot_jaguar"] = _char_set({"h": Color("#caa030"), "k": Color("#e0b060"), "1": Color("#2e8b3d"), "2": Color("#2e8b3d"), "b": Color("#222222")})
-	SPRITES["mascot_eagle"]  = _char_set({"h": Color("#ffffff"), "k": Color("#f0f0f0"), "1": Color("#2546c8"), "2": Color("#2546c8"), "b": Color("#444444")})
+	# 吉祥物改为程序化矢量绘制（见 _draw_mascots），不再用人形精灵
 
 func _build_crowd_dots() -> void:
 	var cols := ["#75AADB", "#ffffff", "#cc1122", "#0a6e31", "#ffd700", "#ff7043"]
@@ -782,6 +780,7 @@ func _spawn_security(elite: bool) -> void:
 		"pos": pos, "vel": Vector2.ZERO, "elite": elite, "radius": 13.0,
 		"state": "chase", "timer": 0.0, "lunge_dir": Vector2.ZERO, "lunge_cd": 0.0,
 		"flank": randf_range(-1.0, 1.0),  # 包抄偏移：让每个保安从不同角度逼近
+		"distract_target": null,           # 被狂热粉丝吸引的目标（仅最近 5 个会被赋值）
 		"anim": "stand", "phase": 0.0,
 	})
 
@@ -793,6 +792,26 @@ func _update_security(dt: float) -> void:
 		_spawn_security(elapsed > 60 and randf() < 0.3)
 		# 生成间隔乘以 config 里的倍率（>1 = 刷得更慢）
 		sec_spawn_timer = max(30.0, 90.0 - floor(elapsed / 10.0) - floor(photographed / 4.0)) * float(TUNE.sec_spawn_interval_mult)
+
+	# 狂热粉丝（暴动）只吸引最近的 5 个保安，其余继续追玩家
+	for s in security:
+		s.distract_target = null
+	if riot_active and riot_npcs.size() > 0:
+		var cands: Array = []
+		for s in security:
+			if s.state != "chase": continue
+			var nd := INF
+			var nn = null
+			for r in riot_npcs:
+				var d: float = s.pos.distance_to(r.pos)
+				if d < nd: nd = d; nn = r
+			if nn != null and nd < 320.0:
+				cands.append({"s": s, "npc": nn, "d": nd})
+		cands.sort_custom(func(a, b): return a.d < b.d)
+		for i in range(min(5, cands.size())):
+			var entry: Dictionary = cands[i]
+			var g: Dictionary = entry.s
+			g.distract_target = entry.npc
 
 	# 保安速度只吸收主角“移速增幅”的一半：主角 +10% → 保安 +5%
 	var pcur: float = TUNE.player_base_speed * (1.0 + (upgrades.speed_mult - 1.0) * 0.5)
@@ -823,15 +842,9 @@ func _update_security(dt: float) -> void:
 				s.flank = randf_range(-1.0, 1.0)
 		else:
 			var target := p_pos
-			if riot_active and riot_npcs.size() > 0:
-				var nd := INF
-				var nearest = null
-				for r in riot_npcs:
-					var d: float = s.pos.distance_to(r.pos)
-					if d < nd: nd = d; nearest = r
-				if nearest != null and nd < 260:
-					target = nearest.pos
-					chasing_decoy = true
+			if s.distract_target != null:
+				target = s.distract_target.pos
+				chasing_decoy = true
 			# 包抄：远距离时瞄准玩家身侧偏移点（分散成弧形围堵），贴近时收回直扑
 			if not chasing_decoy:
 				var to_p: Vector2 = p_pos - s.pos
@@ -913,10 +926,11 @@ func _spawn_mascot(def: Dictionary) -> void:
 		2: pos = Vector2(0, randf() * WORLD.y)
 		_: pos = Vector2(WORLD.x, randf() * WORLD.y)
 	var m := {
-		"type": def.type, "sprite": def.sprite, "label": def.label, "color": Color(def.color),
+		"type": def.type, "label": def.label,
+		"name_col": Color(def.name_col), "jersey": Color(def.jersey),
+		"fur": Color(def.fur), "boot": Color(def.boot),
 		"pos": pos, "dir": Vector2.ZERO, "speed": 0.0,
-		"state": "aim", "timer": MASCOT_AIM,
-		"anim": "stand", "phase": 0.0,
+		"state": "aim", "timer": MASCOT_AIM, "phase": randf() * TAU,
 	}
 	mascots.append(m)
 
@@ -924,7 +938,7 @@ func _launch_mascot_charge(m: Dictionary) -> void:
 	m.dir = (p_pos - m.pos).normalized()       # 锁定玩家当前瞬时位置
 	if m.dir.length() < 0.01:
 		m.dir = Vector2(0, -1)
-	m.speed = TUNE.player_base_speed * upgrades.speed_mult * 2.0  # 玩家的两倍速
+	m.speed = TUNE.player_base_speed * upgrades.speed_mult * float(TUNE.mascot_speed_mult)  # 主角速度 × 倍率
 	m.state = "charge"
 
 func _update_mascots(dt: float) -> void:
@@ -932,9 +946,10 @@ func _update_mascots(dt: float) -> void:
 	while mascot_spawn_idx < MASCOT_DEFS.size() and elapsed >= MASCOT_TIMES[mascot_spawn_idx]:
 		var def: Dictionary = MASCOT_DEFS[mascot_spawn_idx]
 		_spawn_mascot(def)
-		_say("【吉祥物登场】%s 冲入球场！" % def.label, Color(def.color))
+		_say("【吉祥物登场】%s 冲入球场！" % def.label, Color(def.name_col))
 		shake = 12.0
 		mascot_spawn_idx += 1
+	var sec_base: float = TUNE.player_base_speed * upgrades.speed_mult
 	for m in mascots:
 		match m.state:
 			"aim":
@@ -943,7 +958,14 @@ func _update_mascots(dt: float) -> void:
 					_launch_mascot_charge(m)
 			"charge":
 				m.pos += m.dir * m.speed * dt
-				_step_anim(m, m.speed, dt)
+				# 冲散沿途保安：把附近保安猛地弹开并短暂踉跄
+				for s in security:
+					if s.pos.distance_to(m.pos) < MASCOT_SCATTER:
+						var away: Vector2 = (s.pos - m.pos)
+						if away.length() < 0.01: away = Vector2(randf() - 0.5, randf() - 0.5)
+						s.vel = away.normalized() * sec_base * 5.0
+						s.state = "recover"
+						s.timer = 28.0
 				# 贯穿出界 → 夹到边线、休息
 				if m.pos.x < -70 or m.pos.x > WORLD.x + 70 or m.pos.y < -70 or m.pos.y > WORLD.y + 70:
 					m.pos = Vector2(clampf(m.pos.x, 0, WORLD.x), clampf(m.pos.y, 0, WORLD.y))
@@ -1157,48 +1179,81 @@ func _draw_riot() -> void:
 func _draw_mascots() -> void:
 	var t := Time.get_ticks_msec()
 	for m in mascots:
-		var w := 52.0
-		var h := 76.0
-		var head: Vector2 = m.pos + Vector2(0.0, -h * 0.46)
-		# 瞄准预警：朝玩家画一条闪烁的红色警示线 + 地面光环
+		var c: Vector2 = m.pos
+		var jersey: Color = m.jersey
+		var fur: Color = m.fur
+		var boot: Color = m.boot
+		var dark := Color(fur.r * 0.55, fur.g * 0.55, fur.b * 0.55)
+		# 预警 / 休息提示
 		if m.state == "aim":
 			var aimdir: Vector2 = (p_pos - m.pos).normalized()
-			var pulse := 0.4 + 0.4 * sin(t * 0.03)
-			draw_line(m.pos, m.pos + aimdir * 900.0, Color(1.0, 0.2, 0.2, pulse), 4.0)
-			draw_arc(m.pos, MASCOT_RADIUS + 8.0, 0, TAU, 24, Color(1, 0.3, 0.3, pulse), 3.0)
+			var pulse := 0.45 + 0.4 * sin(t * 0.03)
+			draw_line(c + Vector2(0, -28), c + Vector2(0, -28) + aimdir * 1100.0, Color(1.0, 0.2, 0.2, pulse), 5.0)
+			draw_arc(c, MASCOT_RADIUS + 10.0, 0, TAU, 26, Color(1, 0.3, 0.3, pulse), 3.0)
 		elif m.state == "rest":
-			draw_arc(m.pos, MASCOT_RADIUS + 6.0, 0, TAU, 24, Color(0.7, 0.7, 0.7, 0.35), 2.0)
-		# Boss 光环
-		draw_circle(m.pos + Vector2(0, -h * 0.2), w * 0.62, Color(m.color.r, m.color.g, m.color.b, 0.18))
-		var bob := _hop(m) if m.state == "charge" else 0.0
-		_draw_sprite(SPRITES[m.sprite][m.anim], m.pos, w, h, m.dir.x < -0.1, bob)
-		_draw_mascot_feature(m, head + Vector2(0, bob), w)
-		# 名字
-		draw_string(font, m.pos + Vector2(-30, -h * 0.74), m.label, HORIZONTAL_ALIGNMENT_CENTER, 60, 20, m.color)
-
-func _draw_mascot_feature(m: Dictionary, head: Vector2, w: float) -> void:
-	match m.type:
-		"moose":
-			var col := Color("#e8d8b0")
-			for s in [-1.0, 1.0]:
-				var b := head + Vector2(s * w * 0.16, -w * 0.18)
-				draw_line(head + Vector2(s * w * 0.08, -w * 0.06), b, col, 3.0)
-				draw_line(b, b + Vector2(s * w * 0.16, -w * 0.10), col, 3.0)
-				draw_line(b, b + Vector2(s * w * 0.04, -w * 0.20), col, 3.0)
-		"jaguar":
-			var col := Color("#caa030")
-			for s in [-1.0, 1.0]:
-				var ear := PackedVector2Array([
-					head + Vector2(s * w * 0.20, -w * 0.12),
-					head + Vector2(s * w * 0.30, -w * 0.02),
-					head + Vector2(s * w * 0.10, 0.0)])
-				draw_colored_polygon(ear, col)
-		"eagle":
-			var beak := PackedVector2Array([
-				head + Vector2(-w * 0.07, w * 0.02),
-				head + Vector2(w * 0.07, w * 0.02),
-				head + Vector2(0.0, w * 0.16)])
-			draw_colored_polygon(beak, Color("#ffcc33"))
+			draw_arc(c, MASCOT_RADIUS + 6.0, 0, TAU, 26, Color(0.75, 0.75, 0.75, 0.35), 2.0)
+		# 落地软阴影
+		draw_circle(c + Vector2(0, -3), 20, Color(0, 0, 0, 0.16))
+		var bob: float = -abs(sin(t * 0.02 + float(m.phase))) * 4.0 if m.state == "charge" else 0.0
+		var off := Vector2(0, bob)
+		# 腿
+		for sgn in [-1.0, 1.0]:
+			draw_line(c + Vector2(sgn * 8, -17) + off, c + Vector2(sgn * 8, -3), boot, 7.0)
+		# 身体（球衣）
+		var body: Vector2 = c + Vector2(0, -32) + off
+		draw_circle(body, 18, jersey)
+		# 手
+		for sgn in [-1.0, 1.0]:
+			draw_circle(body + Vector2(sgn * 17, 1), 6.5, fur)
+		# 头
+		var head: Vector2 = c + Vector2(0, -57) + off
+		var hr := 21.0
+		# —— 头部后方特征（角 / 耳）——
+		match m.type:
+			"moose":
+				var ac := Color("#efe2c2")
+				for sgn in [-1.0, 1.0]:
+					var b0 := head + Vector2(sgn * 7, -hr * 0.7)
+					var b1 := b0 + Vector2(sgn * 12, -10)
+					draw_line(b0, b1, ac, 4.0)
+					draw_line(b1, b1 + Vector2(sgn * 11, -3), ac, 4.0)
+					draw_line(b1, b1 + Vector2(sgn * 3, -12), ac, 4.0)
+					draw_line(b1 + Vector2(sgn * 6, -2), b1 + Vector2(sgn * 13, -9), ac, 4.0)
+			"jaguar":
+				for sgn in [-1.0, 1.0]:
+					var ear := PackedVector2Array([
+						head + Vector2(sgn * 9, -hr * 0.75),
+						head + Vector2(sgn * 20, -hr * 1.05),
+						head + Vector2(sgn * 20, -hr * 0.55)])
+					draw_colored_polygon(ear, fur)
+					draw_circle(head + Vector2(sgn * 16, -hr * 0.8), 3.0, Color("#7a4a8a"))
+			"eagle":
+				# 头冠羽毛
+				draw_colored_polygon(PackedVector2Array([
+					head + Vector2(-6, -hr * 0.9), head + Vector2(6, -hr * 0.9), head + Vector2(0, -hr * 1.4)]), fur)
+		# 头主体
+		draw_circle(head, hr, fur)
+		# 大眼睛（萌）：白底 + 朝玩家看的瞳孔
+		var look: Vector2 = (p_pos - head).normalized() * 2.4
+		for sgn in [-1.0, 1.0]:
+			var eye := head + Vector2(sgn * 8, -2)
+			draw_circle(eye, 6.6, Color.WHITE)
+			draw_circle(eye + look, 3.4, Color(0.08, 0.08, 0.08))
+			draw_circle(eye + look + Vector2(-1, -1), 1.1, Color.WHITE)  # 高光
+		# —— 头部前方特征（鼻 / 喙 / 斑点）——
+		match m.type:
+			"moose":
+				draw_circle(head + Vector2(0, hr * 0.55), 6.0, Color("#8a5a3a"))  # 大鼻头
+			"jaguar":
+				draw_colored_polygon(PackedVector2Array([
+					head + Vector2(-3, hr * 0.5), head + Vector2(3, hr * 0.5), head + Vector2(0, hr * 0.72)]), Color("#5a3a2a"))
+				for sp in [Vector2(-12, -8), Vector2(11, -6), Vector2(-9, 6), Vector2(10, 7)]:
+					draw_circle(head + sp * 0.9, 2.0, dark)
+			"eagle":
+				draw_colored_polygon(PackedVector2Array([
+					head + Vector2(-6, hr * 0.35), head + Vector2(6, hr * 0.35), head + Vector2(0, hr * 0.8)]), Color("#ffb83a"))
+		# 名字（头顶上方）
+		draw_string(font, c + Vector2(-34, -100), m.label, HORIZONTAL_ALIGNMENT_CENTER, 68, 18, m.name_col)
 
 func _draw_player() -> void:
 	_draw_sprite(SPRITES["fan"][p_anim], p_pos, 28, 42, p_face.x < -0.1, 0.0 if p_rolling else _hop(self))
