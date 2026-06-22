@@ -160,6 +160,7 @@ var lbl_over_quip: Label
 var lbl_over_hint: Label
 var qr_rect: TextureRect
 var trophy_rect: TextureRect
+var win_glow_rect: TextureRect
 var won := false
 var win_confetti_timer := 0.0
 var upgrade_box: VBoxContainer
@@ -486,12 +487,13 @@ func _process(delta: float) -> void:
 			if p_combo_timer <= 0: p_combo = 0
 		_update_hud()
 	elif state == St.OVER and won:
-		# 胜利画面：持续下彩带
+		# 胜利画面：持续下彩带 + 金色暗角呼吸
 		win_confetti_timer -= dt
 		if win_confetti_timer <= 0:
 			win_confetti_timer = 12.0
 			_spawn_confetti_rain()
 		_update_confetti(dt)
+		win_glow_rect.modulate.a = 0.45 + 0.2 * sin(Time.get_ticks_msec() * 0.004)
 		if shake > 0:
 			shake = max(0.0, shake - 0.6 * dt)
 			cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake
@@ -1457,7 +1459,7 @@ func _make_trophy_tex() -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 # 生成"中间透明、四周泛红"的暗角贴图（矩形等值线，贴合屏幕边缘）
-func _make_vignette_tex() -> ImageTexture:
+func _make_vignette_tex(col: Color = Color(0.85, 0.0, 0.0)) -> ImageTexture:
 	var sz := 128
 	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
 	var c := (sz - 1) / 2.0
@@ -1466,8 +1468,8 @@ func _make_vignette_tex() -> ImageTexture:
 			var dx: float = abs(x - c) / c
 			var dy: float = abs(y - c) / c
 			var d: float = max(dx, dy)             # 0=中心, 1=边缘
-			var a: float = smoothstep(0.45, 1.0, d)  # 中心 45% 透明，越靠边越红
-			img.set_pixel(x, y, Color(0.85, 0.0, 0.0, a))
+			var a: float = smoothstep(0.45, 1.0, d)  # 中心 45% 透明，越靠边越浓
+			img.set_pixel(x, y, Color(col.r, col.g, col.b, a))
 	return ImageTexture.create_from_image(img)
 
 func _place(c: Control, al: float, at: float, ar: float, ab: float, ol: float, ot: float, ore: float, ob: float) -> void:
@@ -1592,22 +1594,33 @@ func _build_panels() -> void:
 
 	panel_over = _overlay()
 	panel_over.visible = false
-	# 左侧二维码（扫码到游戏地址）
+	# 胜利时的金色暗角（替代红色危机光）
+	win_glow_rect = TextureRect.new()
+	win_glow_rect.texture = _make_vignette_tex(Color(1.0, 0.84, 0.2))
+	win_glow_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	win_glow_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	win_glow_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	win_glow_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	win_glow_rect.visible = false
+	panel_over.add_child(win_glow_rect)
+	# 左侧二维码（扫码到游戏地址）——略小、内移，文字在下方居中
 	qr_rect = TextureRect.new()
 	qr_rect.texture = _load_png_dat("res://qr.png.dat")
 	qr_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	qr_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_place(qr_rect, 0, 0.5, 0, 0.5, 26, -90, 206, 90)
+	_place(qr_rect, 0, 0.5, 0, 0.5, 78, -118, 228, 32)
 	panel_over.add_child(qr_rect)
-	var qr_lab := _mk_label(GameConfig.SHARE_HINT, 17, Color(1, 1, 1, 0.9))
-	_place(qr_lab, 0, 0.5, 0, 0.5, 20, 96, 230, 130)
+	var qr_lab := _mk_label(GameConfig.SHARE_HINT, 18, Color(1, 1, 1, 0.92))
+	qr_lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_place(qr_lab, 0, 0.5, 0, 0.5, 58, 44, 248, 80)
 	panel_over.add_child(qr_lab)
-	# 右侧大奖杯（胜利时显示）
+	# 右侧大奖杯（胜利时显示）——内移
 	trophy_rect = TextureRect.new()
-	trophy_rect.texture = _make_trophy_tex()
+	var trophy_tex: ImageTexture = _load_png_dat("res://trophy.png.dat")
+	trophy_rect.texture = trophy_tex if trophy_tex != null else _make_trophy_tex()
 	trophy_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	trophy_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_place(trophy_rect, 1, 0.5, 1, 0.5, -250, -150, -30, 150)
+	_place(trophy_rect, 1, 0.5, 1, 0.5, -300, -150, -78, 150)
 	trophy_rect.visible = false
 	panel_over.add_child(trophy_rect)
 	# 中间文字
@@ -1764,6 +1777,8 @@ func _game_over(by: String = "security") -> void:
 	lbl_over_stats.text = "得分：%d\n合影人数：%d\n存活时间：%s" % [score, photographed, _fmt_time(elapsed)]
 	var ov_bg: ColorRect = panel_over
 	ov_bg.color = Color(0, 0, 0, 0.45) if won else Color(0, 0, 0, 0.82)
+	danger_rect.modulate.a = 0.0          # 结算时清掉红色危机光
+	win_glow_rect.visible = won           # 胜利时显示金色暗角
 	if won:
 		# 胜利：抓满 22 人后被抓
 		lbl_over_title.add_theme_color_override("font_color", Color("#ffd700"))
