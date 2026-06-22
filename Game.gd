@@ -106,6 +106,19 @@ const LUNGE_CD_AFTER := 70.0
 var riot_active := false
 var riot_timer := 0.0
 
+# ---------- 吉祥物 mini-boss（存活 1/2/3 分钟陆续登场）----------
+var mascots: Array = []
+var mascot_spawn_idx := 0
+const MASCOT_DEFS := [
+	{"type": "moose",  "sprite": "mascot_moose",  "label": "红麋鹿", "color": "#ff5a4a"},
+	{"type": "jaguar", "sprite": "mascot_jaguar", "label": "绿猎豹", "color": "#5ad36a"},
+	{"type": "eagle",  "sprite": "mascot_eagle",  "label": "蓝鹰",   "color": "#5a8cff"},
+]
+const MASCOT_TIMES := [3600.0, 7200.0, 10800.0]  # 1/2/3 分钟（帧）
+const MASCOT_AIM := 32.0       # 冲锋前的瞄准预警（约 0.5s）
+const MASCOT_REST := 600.0     # 贯穿后在边线休息 10 秒
+const MASCOT_RADIUS := 26.0    # 普通保安(13)的两倍
+
 # 表现层
 var shake := 0.0
 var flash_alpha := 0.0
@@ -215,6 +228,10 @@ func _build_sprites() -> void:
 	SPRITES["guard"] = _char_set({"h": Color("#000000"), "k": Color("#caa07a"), "1": Color("#222831"), "2": Color("#11151a"), "b": Color("#000000")})
 	SPRITES["guardElite"] = _char_set({"h": Color("#1a0033"), "k": Color("#caa07a"), "1": Color("#4a148c"), "2": Color("#7b1fa2"), "b": Color("#000000")})
 	SPRITES["riot"] = _char_set({"h": Color("#333333"), "k": Color("#ffccaa"), "1": Color("#69f0ae"), "2": Color("#2e7d32"), "b": Color("#111111")})
+	# 三个世界杯吉祥物（红麋鹿 / 绿猎豹 / 蓝白头鹰），身体用各自队色，头部特征另行绘制
+	SPRITES["mascot_moose"]  = _char_set({"h": Color("#7a4a2a"), "k": Color("#caa07a"), "1": Color("#d23b2a"), "2": Color("#d23b2a"), "b": Color("#3a2a1a")})
+	SPRITES["mascot_jaguar"] = _char_set({"h": Color("#caa030"), "k": Color("#e0b060"), "1": Color("#2e8b3d"), "2": Color("#2e8b3d"), "b": Color("#222222")})
+	SPRITES["mascot_eagle"]  = _char_set({"h": Color("#ffffff"), "k": Color("#f0f0f0"), "1": Color("#2546c8"), "2": Color("#2546c8"), "b": Color("#444444")})
 
 func _build_crowd_dots() -> void:
 	var cols := ["#75AADB", "#ffffff", "#cc1122", "#0a6e31", "#ffd700", "#ff7043"]
@@ -447,6 +464,7 @@ func _process(delta: float) -> void:
 		_refill_players(dt)
 		_update_security(dt)
 		_update_riot(dt)
+		_update_mascots(dt)
 		_update_confetti(dt)
 		_update_flashes(dt)
 		_update_chants(dt)
@@ -883,6 +901,64 @@ func _update_riot(dt: float) -> void:
 		riot_npcs.clear()
 
 # ----------------------------------------------------------------------------
+# 吉祥物 mini-boss：边线直线冲锋（玩家2倍速、体型2倍），贯穿后休息10秒再冲
+# ----------------------------------------------------------------------------
+func _spawn_mascot(def: Dictionary) -> void:
+	# 从某条边线随机一点登场
+	var edge := randi() % 4
+	var pos: Vector2
+	match edge:
+		0: pos = Vector2(randf() * WORLD.x, 0)
+		1: pos = Vector2(randf() * WORLD.x, WORLD.y)
+		2: pos = Vector2(0, randf() * WORLD.y)
+		_: pos = Vector2(WORLD.x, randf() * WORLD.y)
+	var m := {
+		"type": def.type, "sprite": def.sprite, "label": def.label, "color": Color(def.color),
+		"pos": pos, "dir": Vector2.ZERO, "speed": 0.0,
+		"state": "aim", "timer": MASCOT_AIM,
+		"anim": "stand", "phase": 0.0,
+	}
+	mascots.append(m)
+
+func _launch_mascot_charge(m: Dictionary) -> void:
+	m.dir = (p_pos - m.pos).normalized()       # 锁定玩家当前瞬时位置
+	if m.dir.length() < 0.01:
+		m.dir = Vector2(0, -1)
+	m.speed = TUNE.player_base_speed * upgrades.speed_mult * 2.0  # 玩家的两倍速
+	m.state = "charge"
+
+func _update_mascots(dt: float) -> void:
+	# 到点登场（1/2/3 分钟）
+	while mascot_spawn_idx < MASCOT_DEFS.size() and elapsed >= MASCOT_TIMES[mascot_spawn_idx]:
+		var def: Dictionary = MASCOT_DEFS[mascot_spawn_idx]
+		_spawn_mascot(def)
+		_say("【吉祥物登场】%s 冲入球场！" % def.label, Color(def.color))
+		shake = 12.0
+		mascot_spawn_idx += 1
+	for m in mascots:
+		match m.state:
+			"aim":
+				m.timer -= dt
+				if m.timer <= 0:
+					_launch_mascot_charge(m)
+			"charge":
+				m.pos += m.dir * m.speed * dt
+				_step_anim(m, m.speed, dt)
+				# 贯穿出界 → 夹到边线、休息
+				if m.pos.x < -70 or m.pos.x > WORLD.x + 70 or m.pos.y < -70 or m.pos.y > WORLD.y + 70:
+					m.pos = Vector2(clampf(m.pos.x, 0, WORLD.x), clampf(m.pos.y, 0, WORLD.y))
+					m.state = "rest"
+					m.timer = MASCOT_REST
+				elif not p_rolling and not god_mode and m.pos.distance_to(p_pos) < MASCOT_RADIUS + p_radius:
+					_game_over()
+					return
+			"rest":
+				m.timer -= dt
+				if m.timer <= 0:
+					m.state = "aim"
+					m.timer = MASCOT_AIM
+
+# ----------------------------------------------------------------------------
 # 粒子 / 表现
 # ----------------------------------------------------------------------------
 func _spawn_confetti(pos: Vector2) -> void:
@@ -941,6 +1017,7 @@ func _draw() -> void:
 	_draw_footballers()
 	_draw_riot()
 	_draw_security()
+	_draw_mascots()
 	_draw_player()
 	_draw_confetti()
 
@@ -1076,6 +1153,52 @@ func _draw_security() -> void:
 func _draw_riot() -> void:
 	for r in riot_npcs:
 		_draw_sprite(SPRITES["riot"][r.anim], r.pos, 22, 34, r.dir.x < -0.1, _hop(r))
+
+func _draw_mascots() -> void:
+	var t := Time.get_ticks_msec()
+	for m in mascots:
+		var w := 52.0
+		var h := 76.0
+		var head: Vector2 = m.pos + Vector2(0.0, -h * 0.46)
+		# 瞄准预警：朝玩家画一条闪烁的红色警示线 + 地面光环
+		if m.state == "aim":
+			var aimdir: Vector2 = (p_pos - m.pos).normalized()
+			var pulse := 0.4 + 0.4 * sin(t * 0.03)
+			draw_line(m.pos, m.pos + aimdir * 900.0, Color(1.0, 0.2, 0.2, pulse), 4.0)
+			draw_arc(m.pos, MASCOT_RADIUS + 8.0, 0, TAU, 24, Color(1, 0.3, 0.3, pulse), 3.0)
+		elif m.state == "rest":
+			draw_arc(m.pos, MASCOT_RADIUS + 6.0, 0, TAU, 24, Color(0.7, 0.7, 0.7, 0.35), 2.0)
+		# Boss 光环
+		draw_circle(m.pos + Vector2(0, -h * 0.2), w * 0.62, Color(m.color.r, m.color.g, m.color.b, 0.18))
+		var bob := _hop(m) if m.state == "charge" else 0.0
+		_draw_sprite(SPRITES[m.sprite][m.anim], m.pos, w, h, m.dir.x < -0.1, bob)
+		_draw_mascot_feature(m, head + Vector2(0, bob), w)
+		# 名字
+		draw_string(font, m.pos + Vector2(-30, -h * 0.74), m.label, HORIZONTAL_ALIGNMENT_CENTER, 60, 20, m.color)
+
+func _draw_mascot_feature(m: Dictionary, head: Vector2, w: float) -> void:
+	match m.type:
+		"moose":
+			var col := Color("#e8d8b0")
+			for s in [-1.0, 1.0]:
+				var b := head + Vector2(s * w * 0.16, -w * 0.18)
+				draw_line(head + Vector2(s * w * 0.08, -w * 0.06), b, col, 3.0)
+				draw_line(b, b + Vector2(s * w * 0.16, -w * 0.10), col, 3.0)
+				draw_line(b, b + Vector2(s * w * 0.04, -w * 0.20), col, 3.0)
+		"jaguar":
+			var col := Color("#caa030")
+			for s in [-1.0, 1.0]:
+				var ear := PackedVector2Array([
+					head + Vector2(s * w * 0.20, -w * 0.12),
+					head + Vector2(s * w * 0.30, -w * 0.02),
+					head + Vector2(s * w * 0.10, 0.0)])
+				draw_colored_polygon(ear, col)
+		"eagle":
+			var beak := PackedVector2Array([
+				head + Vector2(-w * 0.07, w * 0.02),
+				head + Vector2(w * 0.07, w * 0.02),
+				head + Vector2(0.0, w * 0.16)])
+			draw_colored_polygon(beak, Color("#ffcc33"))
 
 func _draw_player() -> void:
 	_draw_sprite(SPRITES["fan"][p_anim], p_pos, 28, 42, p_face.x < -0.1, 0.0 if p_rolling else _hop(self))
@@ -1446,6 +1569,7 @@ func _start_game() -> void:
 	security.clear()
 	for i in range(int(TUNE.base_security)): _spawn_security(false)
 	riot_npcs.clear(); riot_active = false
+	mascots.clear(); mascot_spawn_idx = 0
 	confetti.clear(); flashes.clear(); chants.clear()
 	shake = 0; flash_alpha = 0; gold_flash = 0
 	cam.position = p_pos
