@@ -48,8 +48,33 @@ const STAR_PHOTO_LINES := [
 const MILESTONE_EVERY := 10
 const MILESTONE_TEMPLATE := "已合影 %d 人！你已经是全场最靓的仔！"
 
-# 被捕结算标题（%d 会替换成被捕时场上保安数量）
-const ARREST_TITLE_TEMPLATE := "你被场上 %d 名保安逮捕了！"
+# 被捕结算标题（两个 %d 依次替换：保安数量、吉祥物数量）
+const ARREST_TITLE_TEMPLATE := "你被场上 %d 名保安 + %d 只吉祥物逮捕了！"
+
+# 被保安抓到后的风趣评语
+const SECURITY_QUIPS := [
+	"保安：丫够燥的",
+	"保安：抓你轻轻又松松啊",
+	"保安：收徒！",
+	"保安：转人工",
+	"保安：汗流浃背了吧小子",
+	"保安：下次记得买票",
+]
+# 被吉祥物抓到后的风趣评语
+const MASCOT_QUIPS := [
+	"吉祥物：我们都在用力地活着",
+	"吉祥物：我没看见啊，压到井盖了吗",
+	"吉祥物：泥头车来喽",
+	"吉祥物：再装让你飞起来",
+	"吉祥物：你礼貌吗",
+]
+
+# 抓满 22 人后被抓 = 胜利
+const WIN_GOAL := 22
+const WIN_TITLE := "WIN! 你就是真正的闯场之王！"
+const WIN_SUB := "ohhhhhhhhhhh"
+const WIN_HINT := "截图分享吧！📸"
+const SHARE_HINT := "扫码分享给朋友 →"
 
 # 看台助威字幕
 const CHANT_TEXTS := ["OLE OLE!", "VAMOS!","我爱C罗！","我爱梅西！", "一起合影!", "MESSI!", "加油!", "CR7!","jajajajaja","OMG!","WTF!","我也想合影","我要下去了！","WATCH OUT!"]

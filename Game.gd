@@ -156,6 +156,12 @@ var panel_upgrade: Control
 var panel_over: Control
 var lbl_over_title: Label
 var lbl_over_stats: Label
+var lbl_over_quip: Label
+var lbl_over_hint: Label
+var qr_rect: TextureRect
+var trophy_rect: TextureRect
+var won := false
+var win_confetti_timer := 0.0
 var upgrade_box: VBoxContainer
 var comment_timer := 0.0
 var font: Font
@@ -479,6 +485,16 @@ func _process(delta: float) -> void:
 			p_combo_timer -= dt
 			if p_combo_timer <= 0: p_combo = 0
 		_update_hud()
+	elif state == St.OVER and won:
+		# 胜利画面：持续下彩带
+		win_confetti_timer -= dt
+		if win_confetti_timer <= 0:
+			win_confetti_timer = 12.0
+			_spawn_confetti_rain()
+		_update_confetti(dt)
+		if shake > 0:
+			shake = max(0.0, shake - 0.6 * dt)
+			cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake
 	if comment_timer > 0:
 		comment_timer -= delta
 		if comment_timer <= 0:
@@ -875,7 +891,7 @@ func _update_security(dt: float) -> void:
 		_step_anim(s, s.vel.length(), dt)
 		if not chasing_decoy and not p_rolling and not god_mode:
 			if s.pos.distance_to(p_pos) < s.radius + p_radius:
-				_game_over()
+				_game_over("security")
 				return
 
 # ----------------------------------------------------------------------------
@@ -974,7 +990,7 @@ func _update_mascots(dt: float) -> void:
 					m.state = "rest"
 					m.timer = float(m.rest)
 				elif not p_rolling and not god_mode and m.pos.distance_to(p_pos) < MASCOT_RADIUS + p_radius:
-					_game_over()
+					_game_over("mascot")
 					return
 			"rest":
 				m.timer -= dt
@@ -992,6 +1008,19 @@ func _spawn_confetti(pos: Vector2) -> void:
 			"pos": pos, "vel": Vector2((randf() - 0.5) * 6, (randf() - 1.5) * 6),
 			"color": Color(cols[randi() % cols.size()]), "life": 60.0 + randf() * 30.0,
 			"rot": randf() * TAU, "vr": (randf() - 0.5) * 0.3,
+		})
+
+# 胜利画面：从镜头视野上方横向洒落彩带
+func _spawn_confetti_rain() -> void:
+	var cols := ["#ff5252", "#ffd740", "#69f0ae", "#40c4ff", "#e040fb", "#ffffff"]
+	var half_w := (get_viewport_rect().size.x / 0.95) / 2.0 + 100.0
+	var top := cam.position.y - (get_viewport_rect().size.y / 0.95) / 2.0 - 40.0
+	for i in range(18):
+		confetti.append({
+			"pos": Vector2(cam.position.x + randf_range(-half_w, half_w), top + randf() * 60.0),
+			"vel": Vector2((randf() - 0.5) * 2.0, 2.5 + randf() * 2.5),
+			"color": Color(cols[randi() % cols.size()]), "life": 200.0 + randf() * 80.0,
+			"rot": randf() * TAU, "vr": (randf() - 0.5) * 0.4,
 		})
 
 func _update_confetti(dt: float) -> void:
@@ -1036,6 +1065,11 @@ func _update_danger() -> void:
 func _draw() -> void:
 	if state == St.MENU:
 		_draw_pitch()
+		return
+	if state == St.OVER and won:
+		# 胜利画面：干净的球场 + 漫天彩带
+		_draw_pitch()
+		_draw_confetti()
 		return
 	_draw_pitch()
 	_draw_footballers()
@@ -1295,20 +1329,20 @@ func _build_ui() -> void:
 	add_child(ui)
 
 	# 分数 + 信息（顶部居中）
-	lbl_score = _mk_label("0", 30, Color("#ffd700"))
+	lbl_score = _mk_label("0", 45, Color("#ffd700"))
 	lbl_score.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	lbl_score.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl_score.position.y = 8
 	ui.add_child(lbl_score)
 
-	lbl_info = _mk_label("存活 00:00  已合影 0", 14, Color(1, 1, 1, 0.9))
+	lbl_info = _mk_label("存活 00:00  已合影 0", 21, Color(1, 1, 1, 0.9))
 	lbl_info.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	lbl_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_info.position.y = 46
+	lbl_info.position.y = 62
 	ui.add_child(lbl_info)
 
 	# 升级等级（右上）
-	lbl_levels = _mk_label("", 12, Color("#ffd700"))
+	lbl_levels = _mk_label("", 18, Color("#ffd700"))
 	lbl_levels.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	lbl_levels.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	lbl_levels.position = Vector2(-12, 8)
@@ -1319,7 +1353,7 @@ func _build_ui() -> void:
 	lbl_comment = _mk_label("", 33, Color.WHITE)
 	lbl_comment.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	lbl_comment.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_comment.position.y = 96
+	lbl_comment.position.y = 100
 	lbl_comment.modulate.a = 0
 	ui.add_child(lbl_comment)
 
@@ -1357,7 +1391,7 @@ func _mk_bar(fill_color: Color, bottom: int, h: int, label_text: String) -> Colo
 	fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	fill.offset_left = 0; fill.offset_top = 0; fill.offset_right = w; fill.offset_bottom = h
 	bg.add_child(fill)
-	var lab := _mk_label(label_text, 11, Color(0.8, 1, 0.93))
+	var lab := _mk_label(label_text, 17, Color(0.8, 1, 0.93))
 	lab.position = Vector2(-36, -2)
 	bg.add_child(lab)
 	return fill
@@ -1369,6 +1403,54 @@ func _full_rect(color: Color) -> ColorRect:
 	r.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui.add_child(r)
 	return r
+
+# 从打包的 .dat 读取 PNG 字节生成贴图（用于二维码）
+func _load_png_dat(path: String) -> ImageTexture:
+	if not FileAccess.file_exists(path):
+		return null
+	var fa := FileAccess.open(path, FileAccess.READ)
+	if fa == null:
+		return null
+	var bytes := fa.get_buffer(fa.get_length())
+	fa.close()
+	var img := Image.new()
+	if img.load_png_from_buffer(bytes) != OK:
+		return null
+	return ImageTexture.create_from_image(img)
+
+# 程序化生成一个金色奖杯贴图（碗 + 杆 + 底座 + 把手）
+func _make_trophy_tex() -> ImageTexture:
+	var W := 120
+	var H := 150
+	var img := Image.create(W, H, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var gold := Color("#ffd24a")
+	var hi := Color("#fff2b0")
+	var lo := Color("#caa028")
+	for y in range(H):
+		var fy := float(y) / float(H)
+		for x in range(W):
+			var fx := (float(x) - W / 2.0) / (W / 2.0)
+			var ax := absf(fx)
+			var inside := false
+			if fy < 0.07:
+				inside = ax < 0.86
+			elif fy < 0.42:
+				inside = ax < lerpf(0.80, 0.30, (fy - 0.07) / 0.35)
+			elif fy < 0.64:
+				inside = ax < 0.12
+			elif fy < 0.80:
+				inside = ax < lerpf(0.12, 0.58, (fy - 0.64) / 0.16)
+			else:
+				inside = ax < 0.58
+			if fy > 0.10 and fy < 0.40 and absf(ax - 0.95) < 0.13 and not (fy > 0.30 and ax < 0.82):
+				inside = true
+			if inside:
+				var col := gold
+				if fx < -0.45: col = hi
+				elif fx > 0.55: col = lo
+				img.set_pixel(x, y, col)
+	return ImageTexture.create_from_image(img)
 
 # 生成"中间透明、四周泛红"的暗角贴图（矩形等值线，贴合屏幕边缘）
 func _make_vignette_tex() -> ImageTexture:
@@ -1486,7 +1568,7 @@ func _build_panels() -> void:
 	emph.add_theme_constant_override("outline_size", 7)
 	emph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(emph)
-	var desc := _mk_label("冲入决赛球场，疯狂和球员合影刷分！球员源源不断登场，撑到被保安逮捕为止。\n大牌球星(10/7号)会逃跑，贴脸抓住强制合影得双倍分。\nWASD移动，Shift冲刺，Space翻滚；移动端用左摇杆+右按钮。", 15, Color(1, 1, 1, 0.85))
+	var desc := _mk_label("冲入决赛球场，疯狂和球员合影刷分！球员源源不断登场，撑到被保安逮捕为止。\n大牌球星(10/7号)会逃跑，贴脸抓住强制合影得双倍分。\nWASD移动，Shift冲刺，Space翻滚；移动端用左摇杆+右按钮。", 22, Color(1, 1, 1, 0.85))
 	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	desc.custom_minimum_size = Vector2(620, 0)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1506,13 +1588,41 @@ func _build_panels() -> void:
 
 	panel_over = _overlay()
 	panel_over.visible = false
+	# 左侧二维码（扫码到游戏地址）
+	qr_rect = TextureRect.new()
+	qr_rect.texture = _load_png_dat("res://qr.png.dat")
+	qr_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	qr_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_place(qr_rect, 0, 0.5, 0, 0.5, 26, -90, 206, 90)
+	panel_over.add_child(qr_rect)
+	var qr_lab := _mk_label(GameConfig.SHARE_HINT, 17, Color(1, 1, 1, 0.9))
+	_place(qr_lab, 0, 0.5, 0, 0.5, 20, 96, 230, 130)
+	panel_over.add_child(qr_lab)
+	# 右侧大奖杯（胜利时显示）
+	trophy_rect = TextureRect.new()
+	trophy_rect.texture = _make_trophy_tex()
+	trophy_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	trophy_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_place(trophy_rect, 1, 0.5, 1, 0.5, -250, -150, -30, 150)
+	trophy_rect.visible = false
+	panel_over.add_child(trophy_rect)
+	# 中间文字
 	var ov := _center_box()
 	panel_over.add_child(ov)
-	lbl_over_title = _mk_label("被保安逮捕了！", 34, Color("#ffd700"))
+	lbl_over_title = _mk_label("被逮捕了！", 36, Color("#ffd700"))
+	lbl_over_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_over_title.custom_minimum_size = Vector2(700, 0)
+	lbl_over_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	ov.add_child(lbl_over_title)
-	lbl_over_stats = _mk_label("", 18, Color.WHITE)
+	lbl_over_quip = _mk_label("", 24, Color("#ffe08a"))
+	lbl_over_quip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ov.add_child(lbl_over_quip)
+	lbl_over_stats = _mk_label("", 26, Color.WHITE)
 	lbl_over_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ov.add_child(lbl_over_stats)
+	lbl_over_hint = _mk_label("", 22, Color("#9fe0ff"))
+	lbl_over_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ov.add_child(lbl_over_hint)
 	var rb := _menu_button("再次冲场")
 	ov.add_child(rb)
 	rb.pressed.connect(_start_game)
@@ -1540,7 +1650,7 @@ func _menu_button(text: String) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.custom_minimum_size = Vector2(220, 56)
-	b.add_theme_font_size_override("font_size", 20)
+	b.add_theme_font_size_override("font_size", 30)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = Color("#4caf50")
 	sb.set_corner_radius_all(8)
@@ -1617,6 +1727,7 @@ func _say(text: String, color: Color) -> void:
 # ----------------------------------------------------------------------------
 func _start_game() -> void:
 	score = 0; elapsed = 0; photographed = 0; next_upgrade_at = 1000
+	won = false
 	upgrades = {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": float(TUNE.roll_cost), "photo_radius": 1.0}
 	up_levels = {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0}
 	p_pos = Vector2(WORLD.x / 2, FY1 - 6)
@@ -1642,11 +1753,35 @@ func _start_game() -> void:
 	_play_bgm()  # 首次开始时启动循环 BGM（此时已有用户点击手势，可解锁网页音频）
 	_say(GameConfig.OPENING_LINE, Color.WHITE)
 
-func _game_over() -> void:
+func _game_over(by: String = "security") -> void:
 	state = St.OVER
-	lbl_over_title.text = GameConfig.ARREST_TITLE_TEMPLATE % security.size()
+	won = photographed >= GameConfig.WIN_GOAL
 	lbl_over_stats.text = "得分：%d\n合影人数：%d\n存活时间：%s" % [score, photographed, _fmt_time(elapsed)]
+	var ov_bg: ColorRect = panel_over
+	ov_bg.color = Color(0, 0, 0, 0.45) if won else Color(0, 0, 0, 0.82)
+	if won:
+		# 胜利：抓满 22 人后被抓
+		lbl_over_title.add_theme_color_override("font_color", Color("#ffd700"))
+		lbl_over_title.text = GameConfig.WIN_TITLE
+		lbl_over_quip.text = GameConfig.WIN_SUB
+		lbl_over_hint.text = GameConfig.WIN_HINT
+		trophy_rect.visible = true
+		win_confetti_timer = 0.0
+		crowdRoar_win()
+	else:
+		lbl_over_title.add_theme_color_override("font_color", Color("#ff6b6b"))
+		lbl_over_title.text = GameConfig.ARREST_TITLE_TEMPLATE % [security.size(), mascots.size()]
+		var quips: Array = GameConfig.MASCOT_QUIPS if by == "mascot" else GameConfig.SECURITY_QUIPS
+		lbl_over_quip.text = quips[randi() % quips.size()]
+		lbl_over_hint.text = ""
+		trophy_rect.visible = false
 	panel_over.visible = true
+
+func crowdRoar_win() -> void:
+	# 胜利时炸一波纸屑 + 屏震
+	shake = 14.0
+	for i in range(6):
+		_spawn_confetti(p_pos + Vector2(randf_range(-200, 200), randf_range(-150, 50)))
 
 func _fmt_time(frames: float) -> String:
 	var total := int(frames / 60.0)
