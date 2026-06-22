@@ -1288,8 +1288,8 @@ func _draw_mascots() -> void:
 			"moose":
 				var ac := Color("#efe2c2")
 				for sgn in [-1.0, 1.0]:
-					var axx := hx + sgn * 10
-					var ayy := hy - hr
+					var axx: float = hx + sgn * 10
+					var ayy: float = hy - hr
 					_pr(axx - 2, ayy - 18, 4, 18, ac)
 					_pr(axx + sgn * 6 - 2, ayy - 18, 10, 4, ac)
 					_pr(axx + sgn * 12 - 2, ayy - 26, 4, 10, ac)
@@ -1306,8 +1306,8 @@ func _draw_mascots() -> void:
 		var look: Vector2 = (p_pos - Vector2(hx, hy)).normalized()
 		var lx := 4.0 if look.x > 0.2 else (-4.0 if look.x < -0.2 else 0.0)
 		for sgn in [-1.0, 1.0]:
-			var ex := hx + sgn * 8
-			var ey := hy - 2
+			var ex: float = hx + sgn * 8
+			var ey: float = hy - 2
 			_pr(ex - 6, ey - 6, 12, 12, Color.WHITE)
 			_pr(ex - 2 + lx, ey - 2, 4, 6, Color(0.08, 0.08, 0.08))
 		# 头前特征（鼻 / 喙 / 斑点）

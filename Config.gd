@@ -7,7 +7,7 @@ extends RefCounted
 # 调试开关
 # ============================================================================
 const DEBUG := {
-	"god_mode": false,          # 主角无敌：不会被保安抓住
+	"god_mode": true,          # 主角无敌：不会被保安抓住
 	"start_immediately": false, # 跳过开始菜单，加载后直接开打
 	"mute_audio": false,        # 静音（关闭快门等音效）
 }
