@@ -939,24 +939,23 @@ func _update_riot(dt: float) -> void:
 # ----------------------------------------------------------------------------
 # 吉祥物 mini-boss：边线直线冲锋（玩家2倍速、体型2倍），贯穿后休息10秒再冲
 # ----------------------------------------------------------------------------
-func _spawn_mascot(def: Dictionary) -> void:
-	# 从某条边线随机一点登场
-	var edge := randi() % 4
-	var pos: Vector2
-	match edge:
-		0: pos = Vector2(randf() * WORLD.x, 0)
-		1: pos = Vector2(randf() * WORLD.x, WORLD.y)
-		2: pos = Vector2(0, randf() * WORLD.y)
-		_: pos = Vector2(WORLD.x, randf() * WORLD.y)
-	var m := {
-		"type": def.type, "label": def.label,
-		"name_col": Color(def.name_col), "jersey": Color(def.jersey),
-		"fur": Color(def.fur), "boot": Color(def.boot),
-		"speed_mult": float(def.speed_mult), "rest": float(def.rest),
-		"pos": pos, "dir": Vector2.ZERO, "speed": 0.0,
-		"state": "aim", "timer": MASCOT_AIM, "phase": randf() * TAU,
-	}
-	mascots.append(m)
+# 开局：三个吉祥物在底部边线外（球场下方中央）待机跳舞
+func _spawn_idle_mascots() -> void:
+	mascots.clear()
+	mascot_spawn_idx = 0
+	var n := MASCOT_DEFS.size()
+	for i in range(n):
+		var def: Dictionary = MASCOT_DEFS[i]
+		var spread := (float(i) - (n - 1) / 2.0) * 100.0
+		var pos := Vector2(WORLD.x / 2.0 + spread, WORLD.y - 18.0)
+		mascots.append({
+			"type": def.type, "label": def.label,
+			"name_col": Color(def.name_col), "jersey": Color(def.jersey),
+			"fur": Color(def.fur), "boot": Color(def.boot),
+			"speed_mult": float(def.speed_mult), "rest": float(def.rest),
+			"pos": pos, "dir": Vector2.ZERO, "speed": 0.0,
+			"state": "idle", "timer": 0.0, "phase": float(i) * 0.7,
+		})
 
 func _launch_mascot_charge(m: Dictionary) -> void:
 	m.dir = (p_pos - m.pos).normalized()       # 锁定玩家当前瞬时位置
@@ -967,16 +966,19 @@ func _launch_mascot_charge(m: Dictionary) -> void:
 	m.state = "charge"
 
 func _update_mascots(dt: float) -> void:
-	# 到点登场（1/2/3 分钟）
-	while mascot_spawn_idx < MASCOT_DEFS.size() and elapsed >= MASCOT_TIMES[mascot_spawn_idx]:
-		var def: Dictionary = MASCOT_DEFS[mascot_spawn_idx]
-		_spawn_mascot(def)
-		_say("【吉祥物登场】%s 冲入球场！" % def.label, Color(def.name_col))
+	# 到点激活（30/60/90 秒）：让一个待机的吉祥物开始冲锋
+	while mascot_spawn_idx < mascots.size() and mascot_spawn_idx < MASCOT_TIMES.size() and elapsed >= MASCOT_TIMES[mascot_spawn_idx]:
+		var m: Dictionary = mascots[mascot_spawn_idx]
+		m.state = "aim"
+		m.timer = MASCOT_AIM
+		_say("【吉祥物登场】%s 冲入球场！" % m.label, m.name_col)
 		shake = 12.0
 		mascot_spawn_idx += 1
 	var sec_base: float = TUNE.player_base_speed * upgrades.speed_mult
 	for m in mascots:
 		match m.state:
+			"idle":
+				pass  # 在边线待机跳舞（动作在 _draw_mascots 里）
 			"aim":
 				m.timer -= dt
 				if m.timer <= 0:
@@ -1237,8 +1239,15 @@ func _draw_mascots() -> void:
 			draw_arc(c, MASCOT_RADIUS + 6.0, 0, TAU, 26, Color(0.75, 0.75, 0.75, 0.35), 2.0)
 		# 落地软阴影
 		draw_circle(c + Vector2(0, -3), 20, Color(0, 0, 0, 0.16))
-		var bob: float = -abs(sin(t * 0.02 + float(m.phase))) * 4.0 if m.state == "charge" else 0.0
-		var off := Vector2(0, bob)
+		var bob := 0.0
+		var sway := 0.0
+		if m.state == "charge":
+			bob = -abs(sin(t * 0.02 + float(m.phase))) * 4.0
+		elif m.state == "idle":
+			# 待机跳舞：上下蹦 + 左右摇摆
+			bob = -abs(sin(t * 0.011 + float(m.phase))) * 9.0
+			sway = sin(t * 0.006 + float(m.phase)) * 7.0
+		var off := Vector2(sway, bob)
 		# 腿
 		for sgn in [-1.0, 1.0]:
 			draw_line(c + Vector2(sgn * 8, -17) + off, c + Vector2(sgn * 8, -3), boot, 7.0)
@@ -1771,7 +1780,7 @@ func _start_game() -> void:
 	security.clear()
 	for i in range(int(TUNE.base_security)): _spawn_security(false)
 	riot_npcs.clear(); riot_active = false
-	mascots.clear(); mascot_spawn_idx = 0
+	_spawn_idle_mascots()
 	confetti.clear(); flashes.clear(); chants.clear()
 	shake = 0; flash_alpha = 0; gold_flash = 0
 	cam.position = p_pos
@@ -1797,10 +1806,7 @@ func _game_over(by: String = "security") -> void:
 	win_glow_rect.visible = won           # 胜利时显示金色暗角
 	if touch_root != null: touch_root.visible = false   # 结算时隐藏摇杆/按钮
 	if won:
-		# 胜利：抓满 22 人后被抓。镜头回到球场中央，避免边缘露出深色看台被金光染成暗红
-		cam.position = WORLD / 2.0
-		cam.offset = Vector2.ZERO
-		cam.reset_smoothing()
+		# 胜利：抓满 22 人后被抓
 		lbl_over_title.add_theme_color_override("font_color", Color("#ffd700"))
 		lbl_over_title.text = GameConfig.WIN_TITLE
 		lbl_over_quip.text = GameConfig.WIN_SUB
@@ -1810,7 +1816,12 @@ func _game_over(by: String = "security") -> void:
 		crowdRoar_win()
 	else:
 		lbl_over_title.add_theme_color_override("font_color", Color("#ff6b6b"))
-		lbl_over_title.text = GameConfig.ARREST_TITLE_TEMPLATE % [security.size(), mascots.size()]
+		# mascot_spawn_idx = 已出动（冲锋）的吉祥物数；为 0 时只显示保安数量
+		var active_mascots: int = mascot_spawn_idx
+		if active_mascots > 0:
+			lbl_over_title.text = GameConfig.ARREST_TITLE_TEMPLATE % [security.size(), active_mascots]
+		else:
+			lbl_over_title.text = GameConfig.ARREST_TITLE_SEC_ONLY % security.size()
 		var quips: Array = GameConfig.MASCOT_QUIPS if by == "mascot" else GameConfig.SECURITY_QUIPS
 		lbl_over_quip.text = quips[randi() % quips.size()]
 		lbl_over_hint.text = ""
