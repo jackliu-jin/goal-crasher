@@ -161,6 +161,7 @@ var lbl_over_hint: Label
 var qr_rect: TextureRect
 var trophy_rect: TextureRect
 var win_glow_rect: TextureRect
+var touch_root: Control
 var won := false
 var win_confetti_timer := 0.0
 var upgrade_box: VBoxContainer
@@ -1487,11 +1488,18 @@ func _build_touch_controls() -> void:
 	var gap: float = edge * 0.7
 	var fsize: int = int(btn_d * 0.26)
 
+	# 容器：游戏中显示、菜单/结算时隐藏
+	touch_root = Control.new()
+	touch_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	touch_root.mouse_filter = Control.MOUSE_FILTER_IGNORE   # 自身不拦截，事件传给子节点
+	touch_root.visible = false
+	ui.add_child(touch_root)
+
 	# 虚拟摇杆（左下）
 	var joy := Control.new()
 	_place(joy, 0, 1, 0, 1, edge, -(edge + joy_d), edge + joy_d, -edge)
 	joy.mouse_filter = Control.MOUSE_FILTER_STOP
-	ui.add_child(joy)
+	touch_root.add_child(joy)
 	var joy_bg := _circle_panel(joy_d, Color(1, 1, 1, 0.18))
 	joy.add_child(joy_bg)
 	var knob := _circle_panel(knob_d, Color(1, 1, 1, 0.55))
@@ -1502,13 +1510,13 @@ func _build_touch_controls() -> void:
 	# 翻滚（最右下角）
 	var rl := _circle_button("翻滚", Color(0.31, 0.59, 1, 0.55), fsize)
 	_place(rl, 1, 1, 1, 1, -(edge + btn_d), -(edge + btn_d), -edge, -edge)
-	ui.add_child(rl)
+	touch_root.add_child(rl)
 	rl.button_down.connect(func(): roll_pressed = true)
 
 	# 冲刺（在翻滚左侧）
 	var sp := _circle_button("冲刺", Color(1, 0.31, 0.31, 0.55), fsize)
 	_place(sp, 1, 1, 1, 1, -(edge + btn_d * 2 + gap), -(edge + btn_d), -(edge + btn_d + gap), -edge)
-	ui.add_child(sp)
+	touch_root.add_child(sp)
 	sp.button_down.connect(func(): sprint_held = true)
 	sp.button_up.connect(func(): sprint_held = false)
 
@@ -1579,6 +1587,9 @@ func _build_panels() -> void:
 	desc.custom_minimum_size = Vector2(620, 0)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	v.add_child(desc)
+	var tip := _mk_label("📱 建议横屏游玩", 20, Color("#9fe0ff"))
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(tip)
 	var btn := _menu_button("开始冲场")
 	v.add_child(btn)
 	btn.pressed.connect(_start_game)
@@ -1609,11 +1620,11 @@ func _build_panels() -> void:
 	qr_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	qr_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE   # 忽略原图尺寸，缩放到框内
 	qr_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_place(qr_rect, 0, 0.5, 0, 0.5, 90, -100, 190, 0)
+	_place(qr_rect, 0, 0.5, 0, 0.5, 90, -50, 190, 50)   # 100x100，垂直居中（与奖杯对齐）
 	panel_over.add_child(qr_rect)
 	var qr_lab := _mk_label(GameConfig.SHARE_HINT, 18, Color(1, 1, 1, 0.92))
 	qr_lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_place(qr_lab, 0, 0.5, 0, 0.5, 40, 12, 240, 46)
+	_place(qr_lab, 0, 0.5, 0, 0.5, 40, 60, 240, 94)
 	panel_over.add_child(qr_lab)
 	# 右侧大奖杯（胜利时显示）——缩放到框内完整展示
 	trophy_rect = TextureRect.new()
@@ -1768,6 +1779,8 @@ func _start_game() -> void:
 	panel_start.visible = false
 	panel_over.visible = false
 	panel_upgrade.visible = false
+	danger_rect.visible = true
+	if touch_root != null: touch_root.visible = true   # 游戏中显示摇杆/按钮
 	_update_levels()
 	state = St.PLAY
 	_play_bgm()  # 首次开始时启动循环 BGM（此时已有用户点击手势，可解锁网页音频）
@@ -1779,10 +1792,15 @@ func _game_over(by: String = "security") -> void:
 	lbl_over_stats.text = "得分：%d\n合影人数：%d\n存活时间：%s" % [score, photographed, _fmt_time(elapsed)]
 	var ov_bg: ColorRect = panel_over
 	ov_bg.color = Color(0, 0, 0, 0.45) if won else Color(0, 0, 0, 0.82)
-	danger_rect.modulate.a = 0.0          # 结算时清掉红色危机光
+	danger_rect.modulate.a = 0.0
+	danger_rect.visible = false           # 结算时彻底隐藏红色危机光
 	win_glow_rect.visible = won           # 胜利时显示金色暗角
+	if touch_root != null: touch_root.visible = false   # 结算时隐藏摇杆/按钮
 	if won:
-		# 胜利：抓满 22 人后被抓
+		# 胜利：抓满 22 人后被抓。镜头回到球场中央，避免边缘露出深色看台被金光染成暗红
+		cam.position = WORLD / 2.0
+		cam.offset = Vector2.ZERO
+		cam.reset_smoothing()
 		lbl_over_title.add_theme_color_override("font_color", Color("#ffd700"))
 		lbl_over_title.text = GameConfig.WIN_TITLE
 		lbl_over_quip.text = GameConfig.WIN_SUB
