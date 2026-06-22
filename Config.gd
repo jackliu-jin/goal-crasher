@@ -7,7 +7,7 @@ extends RefCounted
 # 调试开关
 # ============================================================================
 const DEBUG := {
-	"god_mode": true,          # 主角无敌：不会被保安抓住
+	"god_mode": false,          # 主角无敌：不会被保安抓住
 	"start_immediately": false, # 跳过开始菜单，加载后直接开打
 	"mute_audio": false,        # 静音（关闭快门等音效）
 }
@@ -56,11 +56,11 @@ const ARREST_TITLE_SEC_ONLY := "你被场上 %d 名保安逮捕了！"
 # 被保安抓到后的风趣评语
 const SECURITY_QUIPS := [
 	"保安：丫够燥的",
-	"保安：抓你轻轻又松松啊",
+	"保安：抓你轻轻又松松啊~",
 	"保安：收徒！",
 	"保安：转人工",
-	"保安：汗流浃背了吧小子",
-	"保安：下次记得买票",
+	"保安：汗流浃背了吧小子！",
+	"保安：就你能跑是吧？",
 ]
 # 被吉祥物抓到后的风趣评语
 const MASCOT_QUIPS := [
@@ -73,9 +73,9 @@ const MASCOT_QUIPS := [
 
 # 抓满 22 人后被抓 = 胜利
 const WIN_GOAL := 22
-const WIN_TITLE := "WIN! 你就是真正的闯场之王！"
+const WIN_TITLE := "WIN! 你就是真正的冲场之王！"
 const WIN_SUB := "ohhhhhhhhhhh"
-const WIN_HINT := "截图分享吧！📸"
+const WIN_HINT := "截图分享吧！"
 const SHARE_HINT := "扫码分享给朋友 →"
 
 # 看台助威字幕
@@ -93,7 +93,7 @@ static func default_tune() -> Dictionary:
 		"security_accel_elite": 0.085,
 		"fb_accel": 0.10,
 		# —— 镜头 ——
-		"camera_zoom": 0.95,        # 相机缩放：值越大画面越大（越近）；0.72 偏远，1.0 为 1:1
+		"camera_zoom": 1,        # 相机缩放：值越大画面越大（越近）；0.72 偏远，1.0 为 1:1
 		# —— 速度 ——
 		"player_base_speed": 2.6,
 		"sprint_mult": 1.8,

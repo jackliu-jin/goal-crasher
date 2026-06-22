@@ -1,4 +1,4 @@
-# Goal Crasher 闯场之王 — Godot 4 版
+# Goal Crasher 冲场之王 — Godot 4 版
 
 把原 HTML5/Canvas 版用 **Godot 4** 重写：保留像素风角色，叠加 Godot 引擎的润色——
 **相机平滑跟随 + 缩放、震屏、辉光/泛光环境、像素精灵运行时生成、底部体力/狂热槽、全屏闪光、纸屑**。
