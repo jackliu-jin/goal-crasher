@@ -158,6 +158,7 @@ var lbl_over_title: Label
 var lbl_over_stats: Label
 var lbl_over_quip: Label
 var lbl_over_hint: Label
+var lbl_over_no: Label
 var qr_rect: TextureRect
 var trophy_rect: TextureRect
 var win_glow_rect: TextureRect
@@ -1677,6 +1678,9 @@ func _build_panels() -> void:
 	lbl_over_hint = _mk_label("", 22, Color("#9fe0ff"))
 	lbl_over_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ov.add_child(lbl_over_hint)
+	lbl_over_no = _mk_label("", 22, Color("#ffd700"))
+	lbl_over_no.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ov.add_child(lbl_over_no)
 	var rb := _menu_button("再次冲场")
 	ov.add_child(rb)
 	rb.pressed.connect(_start_game)
@@ -1820,12 +1824,14 @@ func _game_over(by: String = "security") -> void:
 	danger_rect.visible = false           # 结算时彻底隐藏红色危机光
 	win_glow_rect.visible = won           # 胜利时显示金色暗角
 	if touch_root != null: touch_root.visible = false   # 结算时隐藏摇杆/按钮
+	lbl_over_no.visible = won
 	if won:
 		# 胜利：抓满 22 人后被抓
 		lbl_over_title.add_theme_color_override("font_color", Color("#ffd700"))
 		lbl_over_title.text = GameConfig.WIN_TITLE
 		lbl_over_quip.text = GameConfig.WIN_SUB
 		lbl_over_hint.text = GameConfig.WIN_HINT
+		lbl_over_no.text = _win_serial_no()
 		trophy_rect.visible = true
 		win_confetti_timer = 0.0
 		crowdRoar_win()
@@ -1852,6 +1858,14 @@ func crowdRoar_win() -> void:
 func _fmt_time(frames: float) -> String:
 	var total := int(frames / 60.0)
 	return "%02d:%02d" % [total / 60, total % 60]
+
+# 胜利证书编号：1014 + (当前时间戳 - 2026-06-23 00:00 时间戳) 去掉末两位，补足 6 位
+func _win_serial_no() -> String:
+	var now := int(Time.get_unix_time_from_system())
+	var diff := now - 1782165600
+	if diff < 0: diff = 0
+	var part2 := int(diff / 100)
+	return "NO. 1014%06d" % part2
 
 func _update_hud() -> void:
 	lbl_score.text = str(score)
