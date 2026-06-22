@@ -92,6 +92,8 @@ const TEAM_DEFS := [
 	{"name": "ARG", "color": "#75AADB", "star": 10},
 	{"name": "POR", "color": "#cc1122", "star": 7},
 ]
+# 普通球员号码池（排除球星专属的 10 和 7，保证全场只有一个 10、一个 7）
+const NON_STAR_NUMS := [2, 3, 4, 5, 6, 8, 9, 11]
 
 var sec_spawn_timer := 0.0
 const LUNGE_RANGE := 70.0
@@ -134,7 +136,7 @@ var bar_stam_fill: ColorRect
 var bar_riot_fill: ColorRect
 var flash_rect: ColorRect
 var gold_rect: ColorRect
-var danger_rect: ColorRect
+var danger_rect: TextureRect
 var panel_start: Control
 var panel_upgrade: Control
 var panel_over: Control
@@ -578,13 +580,13 @@ func _nearest_edge_dir(p: Vector2) -> Vector2:
 	if mn == du: return Vector2(0, -1)
 	return Vector2(0, 1)
 
-func _make_footballer(is_star: bool, at_edge: bool) -> Dictionary:
-	var team: Dictionary = TEAM_DEFS[randi() % TEAM_DEFS.size()]
+func _make_footballer(is_star: bool, team: Dictionary, at_edge: bool) -> Dictionary:
 	var pos := _rand_field_edge() if at_edge else Vector2(FX0 + 60 + randf() * (FW - 120), FY0 + 60 + randf() * (FH - 120))
 	var smax: float = TUNE.star_stamina if is_star else TUNE.common_stamina
+	var num: int = int(team.star) if is_star else int(NON_STAR_NUMS[randi() % NON_STAR_NUMS.size()])
 	var fp := {
 		"id": player_id, "team": team.name, "color": Color(team.color),
-		"number": team.star if is_star else (2 + randi() % 8),
+		"number": num,
 		"is_star": is_star, "pos": pos, "vel": Vector2.ZERO,
 		"dir": Vector2(randf() - 0.5, randf() - 0.5).normalized(),
 		"wander": randf() * 60.0, "photographed": false, "leaving": false,
@@ -597,18 +599,25 @@ func _make_footballer(is_star: bool, at_edge: bool) -> Dictionary:
 	player_id += 1
 	return fp
 
-func _count_stars() -> int:
-	var n := 0
+func _random_team() -> Dictionary:
+	return TEAM_DEFS[randi() % TEAM_DEFS.size()]
+
+# 该队是否已有在场球星（用于保证每队最多一名球星）
+func _team_has_star(team_name: String) -> bool:
 	for fp in players:
-		if fp.is_star and not fp.leaving: n += 1
-	return n
+		if fp.is_star and not fp.leaving and fp.team == team_name:
+			return true
+	return false
 
 func _spawn_players() -> void:
 	players.clear()
 	player_id = 1
 	star_cd = 0.0
-	for i in range(MAX_PLAYERS):
-		players.append(_make_footballer(i < MAX_STARS, false))
+	# 两队各一名球星：阿根廷 10 号、葡萄牙 7 号
+	players.append(_make_footballer(true, TEAM_DEFS[0], false))
+	players.append(_make_footballer(true, TEAM_DEFS[1], false))
+	for i in range(MAX_PLAYERS - 2):
+		players.append(_make_footballer(false, _random_team(), false))
 
 func _refill_players(dt: float) -> void:
 	if star_cd > 0: star_cd -= dt
@@ -616,11 +625,18 @@ func _refill_players(dt: float) -> void:
 	for fp in players:
 		if not fp.leaving: alive += 1
 	if alive < MAX_PLAYERS:
-		var as_star := false
-		if _count_stars() < MAX_STARS and star_cd <= 0:
-			as_star = true
+		# 若某队球星缺席且冷却结束，补回该队球星；否则补普通球员
+		var missing: Dictionary = {}
+		if star_cd <= 0:
+			for t in TEAM_DEFS:
+				if not _team_has_star(t.name):
+					missing = t
+					break
+		if not missing.is_empty():
+			players.append(_make_footballer(true, missing, true))
 			star_cd = 360.0
-		players.append(_make_footballer(as_star, true))
+		else:
+			players.append(_make_footballer(false, _random_team(), true))
 
 func _update_players(dt: float) -> void:
 	var photo_range: float = 50.0 * upgrades.photo_radius
@@ -757,9 +773,11 @@ func _update_security(dt: float) -> void:
 	var target_count: int = int(TUNE.base_security) + int(elapsed / 15.0) + int(score / 1000.0) + speed_bonus + int(photographed / 6.0)
 	if security.size() < min(target_count, int(TUNE.max_security)) and sec_spawn_timer <= 0:
 		_spawn_security(elapsed > 60 and randf() < 0.3)
-		sec_spawn_timer = max(30.0, 90.0 - floor(elapsed / 10.0) - floor(photographed / 4.0))
+		# 生成间隔乘以 config 里的倍率（>1 = 刷得更慢）
+		sec_spawn_timer = max(30.0, 90.0 - floor(elapsed / 10.0) - floor(photographed / 4.0)) * float(TUNE.sec_spawn_interval_mult)
 
-	var pcur: float = TUNE.player_base_speed * upgrades.speed_mult
+	# 保安速度只吸收主角“移速增幅”的一半：主角 +10% → 保安 +5%
+	var pcur: float = TUNE.player_base_speed * (1.0 + (upgrades.speed_mult - 1.0) * 0.5)
 	for s in security:
 		if s.lunge_cd > 0: s.lunge_cd -= dt
 		var chasing_decoy := false
@@ -910,7 +928,7 @@ func _update_danger() -> void:
 		var d: float = s.pos.distance_to(p_pos)
 		if d < mn: mn = d
 	danger = clampf(1.0 - (mn - 30.0) / 180.0, 0.0, 1.0)
-	danger_rect.modulate.a = danger * 0.55
+	danger_rect.modulate.a = danger * 0.9
 
 # ============================================================================
 # 绘制（世界坐标，相机负责变换）
@@ -1126,10 +1144,18 @@ func _build_ui() -> void:
 	bar_stam_fill = _mk_bar(Color("#4caf50"), 30, 13, "体力")
 	bar_riot_fill = _mk_bar(Color("#ff8800"), 14, 9, "狂热")
 
-	# 闪光 / 金光 / 危机 全屏
+	# 闪光 / 金光 全屏
 	flash_rect = _full_rect(Color(1, 1, 1, 1)); flash_rect.modulate.a = 0
 	gold_rect = _full_rect(Color("#ffd700")); gold_rect.modulate.a = 0
-	danger_rect = _full_rect(Color(0.8, 0, 0, 1)); danger_rect.modulate.a = 0
+	# 危机：中间透明、四周泛红的暗角（vignette），而非整屏全红
+	danger_rect = TextureRect.new()
+	danger_rect.texture = _make_vignette_tex()
+	danger_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	danger_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	danger_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	danger_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	danger_rect.modulate.a = 0
+	ui.add_child(danger_rect)
 
 	_build_touch_controls()
 	_build_panels()
@@ -1160,6 +1186,20 @@ func _full_rect(color: Color) -> ColorRect:
 	r.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui.add_child(r)
 	return r
+
+# 生成"中间透明、四周泛红"的暗角贴图（矩形等值线，贴合屏幕边缘）
+func _make_vignette_tex() -> ImageTexture:
+	var sz := 128
+	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
+	var c := (sz - 1) / 2.0
+	for y in range(sz):
+		for x in range(sz):
+			var dx: float = abs(x - c) / c
+			var dy: float = abs(y - c) / c
+			var d: float = max(dx, dy)             # 0=中心, 1=边缘
+			var a: float = smoothstep(0.45, 1.0, d)  # 中心 45% 透明，越靠边越红
+			img.set_pixel(x, y, Color(0.85, 0.0, 0.0, a))
+	return ImageTexture.create_from_image(img)
 
 func _place(c: Control, al: float, at: float, ar: float, ab: float, ol: float, ot: float, ore: float, ob: float) -> void:
 	c.anchor_left = al; c.anchor_top = at; c.anchor_right = ar; c.anchor_bottom = ab
@@ -1258,6 +1298,11 @@ func _build_panels() -> void:
 	var v := _center_box()
 	panel_start.add_child(v)
 	v.add_child(_mk_label("Pitch Invader: World Cup Craze", 30, Color("#ffd700")))
+	# 加粗强调行（Zpix 像素字体无独立粗体，用更大字号 + 更粗描边模拟"加粗"）
+	var emph := _mk_label("挑战更多的合影！更多的疯狂！", 24, Color("#ffd700"))
+	emph.add_theme_constant_override("outline_size", 7)
+	emph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(emph)
 	var desc := _mk_label("冲入决赛球场，疯狂和球员合影刷分！球员源源不断登场，撑到被保安逮捕为止。\n大牌球星(10/7号)会逃跑，贴脸抓住强制合影得双倍分。\nWASD移动，Shift冲刺，Space翻滚；移动端用左摇杆+右按钮。", 15, Color(1, 1, 1, 0.85))
 	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	desc.custom_minimum_size = Vector2(620, 0)
