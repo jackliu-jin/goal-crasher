@@ -493,7 +493,7 @@ func _process(delta: float) -> void:
 			win_confetti_timer = 12.0
 			_spawn_confetti_rain()
 		_update_confetti(dt)
-		win_glow_rect.modulate.a = 0.45 + 0.2 * sin(Time.get_ticks_msec() * 0.004)
+		win_glow_rect.modulate.a = 0.16 + 0.06 * sin(Time.get_ticks_msec() * 0.004)
 		if shake > 0:
 			shake = max(0.0, shake - 0.6 * dt)
 			cam.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * shake
@@ -1459,7 +1459,7 @@ func _make_trophy_tex() -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 # 生成"中间透明、四周泛红"的暗角贴图（矩形等值线，贴合屏幕边缘）
-func _make_vignette_tex(col: Color = Color(0.85, 0.0, 0.0)) -> ImageTexture:
+func _make_vignette_tex(col: Color = Color(0.85, 0.0, 0.0), inner: float = 0.45) -> ImageTexture:
 	var sz := 128
 	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
 	var c := (sz - 1) / 2.0
@@ -1468,7 +1468,7 @@ func _make_vignette_tex(col: Color = Color(0.85, 0.0, 0.0)) -> ImageTexture:
 			var dx: float = abs(x - c) / c
 			var dy: float = abs(y - c) / c
 			var d: float = max(dx, dy)             # 0=中心, 1=边缘
-			var a: float = smoothstep(0.45, 1.0, d)  # 中心 45% 透明，越靠边越浓
+			var a: float = smoothstep(inner, 1.0, d)  # inner 内透明，越靠边越浓
 			img.set_pixel(x, y, Color(col.r, col.g, col.b, a))
 	return ImageTexture.create_from_image(img)
 
@@ -1596,31 +1596,33 @@ func _build_panels() -> void:
 	panel_over.visible = false
 	# 胜利时的金色暗角（替代红色危机光）
 	win_glow_rect = TextureRect.new()
-	win_glow_rect.texture = _make_vignette_tex(Color(1.0, 0.84, 0.2))
+	win_glow_rect.texture = _make_vignette_tex(Color(1.0, 0.85, 0.3), 0.66)  # 金色只在外缘一窄圈
 	win_glow_rect.stretch_mode = TextureRect.STRETCH_SCALE
 	win_glow_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	win_glow_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	win_glow_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 	win_glow_rect.visible = false
 	panel_over.add_child(win_glow_rect)
-	# 左侧二维码（扫码到游戏地址）——略小、内移，文字在下方居中
+	# 左侧二维码（缩小到约 2/3 = 100px，文字在下方居中，不再重叠）
 	qr_rect = TextureRect.new()
 	qr_rect.texture = _load_png_dat("res://qr.png.dat")
 	qr_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	qr_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE   # 忽略原图尺寸，缩放到框内
 	qr_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_place(qr_rect, 0, 0.5, 0, 0.5, 78, -118, 228, 32)
+	_place(qr_rect, 0, 0.5, 0, 0.5, 90, -100, 190, 0)
 	panel_over.add_child(qr_rect)
 	var qr_lab := _mk_label(GameConfig.SHARE_HINT, 18, Color(1, 1, 1, 0.92))
 	qr_lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_place(qr_lab, 0, 0.5, 0, 0.5, 58, 44, 248, 80)
+	_place(qr_lab, 0, 0.5, 0, 0.5, 40, 12, 240, 46)
 	panel_over.add_child(qr_lab)
-	# 右侧大奖杯（胜利时显示）——内移
+	# 右侧大奖杯（胜利时显示）——缩放到框内完整展示
 	trophy_rect = TextureRect.new()
 	var trophy_tex: ImageTexture = _load_png_dat("res://trophy.png.dat")
 	trophy_rect.texture = trophy_tex if trophy_tex != null else _make_trophy_tex()
 	trophy_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	trophy_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE   # 关键：缩放大图到框内，完整显示
 	trophy_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_place(trophy_rect, 1, 0.5, 1, 0.5, -300, -150, -78, 150)
+	_place(trophy_rect, 1, 0.5, 1, 0.5, -320, -170, -70, 170)
 	trophy_rect.visible = false
 	panel_over.add_child(trophy_rect)
 	# 中间文字
