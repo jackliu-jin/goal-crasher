@@ -57,10 +57,8 @@ var god_mode := false
 var survive_acc := 0.0       # 存活计分累积器：每满 60 帧(1秒) +10 分
 var dodge_cd := 0.0          # 险险闪避的全局冷却，避免一瞬间重复触发
 
-# 足球（场上唯一一颗）
-var ball_pos := Vector2.ZERO
-var ball_vel := Vector2.ZERO
-var ball_kick_cd := 0.0
+# 足球（可多颗）：每颗 {"pos": Vector2, "vel": Vector2, "kick_cd": float}
+var balls: Array = []
 
 # 金牌·全场狂热：天降彩带计时
 var gold_rain := 0.0
@@ -86,7 +84,8 @@ var p_anim := "stand"
 var p_phase := 0.0
 
 var upgrades := {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": 5.0, "photo_radius": 1.0, "riot_bonus": 0.0, "ball_size": 1.0}
-var up_levels := {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0, "riot_bonus": 0, "ball_size": 0}
+var up_levels := {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0, "riot_bonus": 0, "ball_size": 0, "ball_count": 0}
+var upgrade_picks := 0       # 本次升级还可选几个技能（一次选两个）
 
 # 实体列表（用字典存储，轻量）
 var players: Array = []      # 球员
@@ -187,6 +186,7 @@ var touch_root: Control
 var won := false
 var win_confetti_timer := 0.0
 var upgrade_box: VBoxContainer
+var lbl_upgrade_hint: Label
 var comment_timer := 0.0
 var font: Font
 
@@ -501,7 +501,7 @@ func _process(delta: float) -> void:
 		_update_security(dt)
 		_update_riot(dt)
 		_update_mascots(dt)
-		_update_ball(dt)
+		_update_balls(dt)
 		_update_confetti(dt)
 		_update_flashes(dt)
 		_update_chants(dt)
@@ -1142,66 +1142,100 @@ func _update_mascots(dt: float) -> void:
 					m.timer = MASCOT_AIM
 
 # ----------------------------------------------------------------------------
-# 足球：触球后沿玩家朝向飞出，撞到 NPC 则其跌倒 5 秒、球停下
+# 足球：触球后朝最近 NPC 飞出，撞到人 → 对方跌倒、球保持原速弹射向下一个最近 NPC，
+# 直到摩擦把速度耗为 0。可同时存在多颗球。
 # ----------------------------------------------------------------------------
 func _ball_radius() -> float:
 	return BALL_RADIUS * float(upgrades.ball_size)
 
-func _update_ball(dt: float) -> void:
-	if ball_kick_cd > 0: ball_kick_cd -= dt
-	var br: float = _ball_radius()
-	# 玩家触球 → 朝“朝向方向最近的 NPC”飞出（无目标则按朝向直飞）
-	if ball_kick_cd <= 0 and p_pos.distance_to(ball_pos) < p_radius + br:
-		ball_vel = _kick_dir() * BALL_KICK
-		ball_kick_cd = 18.0
-		shake = max(shake, 4.0)
-	if ball_vel.length() > BALL_STOP:
-		ball_pos += ball_vel * dt
-		ball_vel *= pow(BALL_FRICTION, dt)
-		# 撞边线反弹（留在场内）
-		if ball_pos.x < FX0 + br: ball_pos.x = FX0 + br; ball_vel.x = -ball_vel.x * 0.7
-		elif ball_pos.x > FX1 - br: ball_pos.x = FX1 - br; ball_vel.x = -ball_vel.x * 0.7
-		if ball_pos.y < FY0 + br: ball_pos.y = FY0 + br; ball_vel.y = -ball_vel.y * 0.7
-		elif ball_pos.y > FY1 - br: ball_pos.y = FY1 - br; ball_vel.y = -ball_vel.y * 0.7
-		_ball_hit_check(br)
-	else:
-		ball_vel = Vector2.ZERO
+func _spawn_ball(pos: Vector2) -> void:
+	balls.append({"pos": pos, "vel": Vector2.ZERO, "kick_cd": 0.0})
 
-# 滚动的球撞到保安/球员/吉祥物 → 对方跌倒、球停下；返回是否命中
-func _ball_hit_check(br: float) -> bool:
+func _update_balls(dt: float) -> void:
+	var br: float = _ball_radius()
+	var kick_speed: float = BALL_KICK * float(upgrades.ball_size)  # 升级后“速度快一倍”
+	for b in balls:
+		if b.kick_cd > 0: b.kick_cd -= dt
+		# 玩家触球 → 朝“朝向方向最近的 NPC”飞出（无目标则按朝向直飞）
+		if b.kick_cd <= 0 and p_pos.distance_to(b.pos) < p_radius + br:
+			b.vel = _kick_dir(b.pos) * kick_speed
+			b.kick_cd = 18.0
+			shake = max(shake, 4.0)
+		if b.vel.length() > BALL_STOP:
+			b.pos += b.vel * dt
+			b.vel *= pow(BALL_FRICTION, dt)
+			# 撞边线反弹（留在场内）
+			if b.pos.x < FX0 + br: b.pos.x = FX0 + br; b.vel.x = -b.vel.x * 0.7
+			elif b.pos.x > FX1 - br: b.pos.x = FX1 - br; b.vel.x = -b.vel.x * 0.7
+			if b.pos.y < FY0 + br: b.pos.y = FY0 + br; b.vel.y = -b.vel.y * 0.7
+			elif b.pos.y > FY1 - br: b.pos.y = FY1 - br; b.vel.y = -b.vel.y * 0.7
+			_ball_hit_check(b, br)
+		else:
+			b.vel = Vector2.ZERO
+
+# 滚动的球撞到保安/球员/吉祥物 → 对方跌倒，球保持原速弹射向最近的其他 NPC；返回是否命中
+func _ball_hit_check(b: Dictionary, br: float) -> bool:
+	var hit_pos := Vector2.ZERO
+	var got := false
 	for s in security:
 		if s.fallen > 0: continue
-		if ball_pos.distance_to(s.pos) < br + float(s.radius):
+		if b.pos.distance_to(s.pos) < br + float(s.radius):
 			s.fallen = FALL_DUR
 			s.state = "chase"
-			s.vel = ball_vel.normalized() * 3.0
-			_ball_knock(s.pos)
-			return true
-	for fp in players:
-		if fp.leaving or fp.fallen > 0: continue
-		if ball_pos.distance_to(fp.pos) < br + 12.0:
-			fp.fallen = FALL_DUR
-			fp.fleeing = false
-			fp.being_photo = false
-			_ball_knock(fp.pos)
-			return true
-	for m in mascots:
-		if m.state == "idle" or m.fallen > 0: continue
-		if ball_pos.distance_to(m.pos) < br + MASCOT_RADIUS:
-			m.fallen = FALL_DUR
-			_ball_knock(m.pos)
-			return true
-	return false
+			s.vel = b.vel.normalized() * 3.0
+			hit_pos = s.pos; got = true; break
+	if not got:
+		for fp in players:
+			if fp.leaving or fp.fallen > 0: continue
+			if b.pos.distance_to(fp.pos) < br + 12.0:
+				fp.fallen = FALL_DUR
+				fp.fleeing = false
+				fp.being_photo = false
+				hit_pos = fp.pos; got = true; break
+	if not got:
+		for m in mascots:
+			if m.state == "idle" or m.fallen > 0: continue
+			if b.pos.distance_to(m.pos) < br + MASCOT_RADIUS:
+				m.fallen = FALL_DUR
+				hit_pos = m.pos; got = true; break
+	if not got:
+		return false
+	# 弹射：保持撞击前的速度，转向最近的其他站立 NPC（没有就维持原方向直飞，靠摩擦停下）
+	var spd: float = b.vel.length()
+	_ball_knock(hit_pos)
+	var nxt: Dictionary = _nearest_standing_npc_pos(b.pos)
+	if nxt.has:
+		b.vel = (nxt.pos - b.pos).normalized() * spd
+	return true
 
+# 撞击表现（不再清零速度，弹射逻辑在 _ball_hit_check 里处理）
 func _ball_knock(pos: Vector2) -> void:
-	ball_vel = Vector2.ZERO
 	shake = max(shake, 9.0)
 	_spawn_confetti(pos)
 	var lines: Array = GameConfig.BALL_HIT_LINES
 	_say(lines[randi() % lines.size()], Color("#ffd740"))
 
+# 离指定点最近的站立 NPC（用于踢球瞄准 / 弹射目标）
+func _nearest_standing_npc_pos(from: Vector2) -> Dictionary:
+	var has := false
+	var best_pos := Vector2.ZERO
+	var best_d := INF
+	for s in security:
+		if s.fallen > 0: continue
+		var d: float = from.distance_to(s.pos)
+		if d < best_d: best_d = d; best_pos = s.pos; has = true
+	for fp in players:
+		if fp.leaving or fp.fallen > 0: continue
+		var d2: float = from.distance_to(fp.pos)
+		if d2 < best_d: best_d = d2; best_pos = fp.pos; has = true
+	for m in mascots:
+		if m.state == "idle" or m.fallen > 0: continue
+		var d3: float = from.distance_to(m.pos)
+		if d3 < best_d: best_d = d3; best_pos = m.pos; has = true
+	return {"has": has, "pos": best_pos}
+
 # 踢球方向：朝玩家朝向 120° 锥形内最近的 NPC；没有就按朝向直飞
-func _kick_dir() -> Vector2:
+func _kick_dir(from: Vector2) -> Vector2:
 	var face: Vector2 = p_face if p_face.length() > 0.01 else Vector2(0, -1)
 	face = face.normalized()
 	var has := false
@@ -1209,24 +1243,24 @@ func _kick_dir() -> Vector2:
 	var best_d := INF
 	for s in security:
 		if s.fallen > 0: continue
-		var v: Vector2 = s.pos - ball_pos
+		var v: Vector2 = s.pos - from
 		var d: float = v.length()
 		if d > 1.0 and face.dot(v / d) > 0.5 and d < best_d:
 			best_d = d; best_pos = s.pos; has = true
 	for fp in players:
 		if fp.leaving or fp.fallen > 0: continue
-		var v2: Vector2 = fp.pos - ball_pos
+		var v2: Vector2 = fp.pos - from
 		var d2: float = v2.length()
 		if d2 > 1.0 and face.dot(v2 / d2) > 0.5 and d2 < best_d:
 			best_d = d2; best_pos = fp.pos; has = true
 	for m in mascots:
 		if m.state == "idle" or m.fallen > 0: continue
-		var v3: Vector2 = m.pos - ball_pos
+		var v3: Vector2 = m.pos - from
 		var d3: float = v3.length()
 		if d3 > 1.0 and face.dot(v3 / d3) > 0.5 and d3 < best_d:
 			best_d = d3; best_pos = m.pos; has = true
 	if has:
-		return (best_pos - ball_pos).normalized()
+		return (best_pos - from).normalized()
 	return face
 
 # ----------------------------------------------------------------------------
@@ -1319,7 +1353,7 @@ func _draw() -> void:
 		return
 	# 胜利画面：保留被捕前的整幅画面（全员一起跳舞，见各 draw 里的 win-dance）
 	_draw_pitch()
-	_draw_ball()
+	_draw_balls()
 	_draw_footballers()
 	_draw_riot()
 	_draw_security()
@@ -1339,16 +1373,18 @@ func _draw_dizzy(pos: Vector2) -> void:
 	draw_string(font, pos + Vector2(-14, 0), "★ ★", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.9, 0.2, a))
 
 # 场上足球（经典黑白块）
-func _draw_ball() -> void:
+func _draw_balls() -> void:
 	var br: float = _ball_radius()
-	draw_circle(ball_pos + Vector2(0, 4), br * 0.9, Color(0, 0, 0, 0.18))
-	draw_circle(ball_pos, br, Color.WHITE)
-	draw_arc(ball_pos, br, 0, TAU, 24, Color(0, 0, 0, 0.45), 2.0)
-	draw_circle(ball_pos, br * 0.34, Color("#222222"))
-	for a in range(5):
-		var ang: float = float(a) / 5.0 * TAU - PI / 2.0
-		var pp: Vector2 = ball_pos + Vector2(cos(ang), sin(ang)) * br * 0.62
-		draw_circle(pp, br * 0.16, Color("#222222"))
+	for b in balls:
+		var bp: Vector2 = b.pos
+		draw_circle(bp + Vector2(0, 4), br * 0.9, Color(0, 0, 0, 0.18))
+		draw_circle(bp, br, Color.WHITE)
+		draw_arc(bp, br, 0, TAU, 24, Color(0, 0, 0, 0.45), 2.0)
+		draw_circle(bp, br * 0.34, Color("#222222"))
+		for a in range(5):
+			var ang: float = float(a) / 5.0 * TAU - PI / 2.0
+			var pp: Vector2 = bp + Vector2(cos(ang), sin(ang)) * br * 0.62
+			draw_circle(pp, br * 0.16, Color("#222222"))
 
 func _hop(e) -> float:
 	var anim: String = e.anim if e is Dictionary else p_anim
@@ -2012,15 +2048,19 @@ func _menu_button(text: String) -> Button:
 func _show_upgrade() -> void:
 	state = St.UPGRADE
 	panel_upgrade.visible = true
+	upgrade_picks = 2   # 一次选两个技能
 	for c in upgrade_box.get_children():
 		c.queue_free()
+	lbl_upgrade_hint = _mk_label("选择 2 个技能", 18, Color("#cfe9ff"))
+	upgrade_box.add_child(lbl_upgrade_hint)
 	var choices := [
 		{"label": "体力上限 +30", "key": "stamina_max"},
 		{"label": "移速/冲刺速度 +15%", "key": "speed_mult"},
 		{"label": "翻滚消耗 -1", "key": "roll_cost"},
 		{"label": "合影判定半径 +20%", "key": "photo_radius"},
 		{"label": "暴动人数 +3", "key": "riot_bonus"},
-		{"label": "足球变大 1 倍", "key": "ball_size"},
+		{"label": "足球大一倍，速度快一倍", "key": "ball_size"},
+		{"label": "场上足球 +1", "key": "ball_count"},
 	]
 	choices.shuffle()
 	# 组装 4 个可选项；5% 概率混入“金牌·全场狂热”稀有卡
@@ -2034,7 +2074,7 @@ func _show_upgrade() -> void:
 	for ch in shown:
 		var is_gold: bool = ch.get("gold", false)
 		var b := _menu_button(ch.label)
-		b.custom_minimum_size = Vector2(320, 50)
+		b.custom_minimum_size = Vector2(320, 48)
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = Color("#7a5c00") if is_gold else Color("#1b5e20")
 		sb.set_corner_radius_all(10)
@@ -2044,15 +2084,32 @@ func _show_upgrade() -> void:
 		if is_gold:
 			b.add_theme_color_override("font_color", Color("#ffe680"))
 		var key: String = ch.key
-		b.pressed.connect(func(): _apply_upgrade(key))
+		var btn := b
+		b.pressed.connect(func(): _pick_upgrade(key, btn))
 		upgrade_box.add_child(b)
 
-func _apply_upgrade(key: String) -> void:
+# 选中一个技能：生效 + 禁用按钮；选满 2 个才关闭面板
+func _pick_upgrade(key: String, btn: Button) -> void:
+	if btn.disabled:
+		return
+	_apply_effect(key)
+	btn.disabled = true
+	btn.modulate.a = 0.4
+	upgrade_picks -= 1
+	_update_levels()
+	if upgrade_picks <= 0:
+		gold_flash = 0.6
+		_say("永久强化已生效！", Color("#ffd700"))
+		panel_upgrade.visible = false
+		state = St.PLAY
+	elif lbl_upgrade_hint != null:
+		lbl_upgrade_hint.text = "再选 %d 个技能" % upgrade_picks
+
+# 应用某个技能的效果（不负责面板开关）
+func _apply_effect(key: String) -> void:
 	# 稀有金牌：不加永久属性，触发全场狂热（30 粉丝冲场 + 天降彩带）
 	if key == "gold_card":
 		_trigger_gold_riot()
-		panel_upgrade.visible = false
-		state = St.PLAY
 		return
 	match key:
 		"stamina_max":
@@ -2067,15 +2124,12 @@ func _apply_upgrade(key: String) -> void:
 			upgrades.riot_bonus += 3.0
 		"ball_size":
 			upgrades.ball_size += 1.0
+		"ball_count":
+			_spawn_ball(Vector2(FX0 + 120.0 + randf() * (FW - 240.0), FY0 + 120.0 + randf() * (FH - 240.0)))
 	up_levels[key] += 1
-	gold_flash = 0.6
-	_say("永久强化已生效！", Color("#ffd700"))
-	panel_upgrade.visible = false
-	state = St.PLAY
-	_update_levels()
 
 func _update_levels() -> void:
-	lbl_levels.text = "体力 Lv%d  移速 Lv%d  翻滚 Lv%d\n视野 Lv%d  暴动 Lv%d  足球 Lv%d" % [up_levels.stamina_max, up_levels.speed_mult, up_levels.roll_cost, up_levels.photo_radius, up_levels.riot_bonus, up_levels.ball_size]
+	lbl_levels.text = "体力 Lv%d  移速 Lv%d  翻滚 Lv%d\n视野 Lv%d  暴动 Lv%d  球力 Lv%d  球数 Lv%d" % [up_levels.stamina_max, up_levels.speed_mult, up_levels.roll_cost, up_levels.photo_radius, up_levels.riot_bonus, up_levels.ball_size, up_levels.ball_count]
 
 # ----------------------------------------------------------------------------
 # 解说
@@ -2095,7 +2149,7 @@ func _start_game() -> void:
 	won = false
 	god_mode = GameConfig.DEBUG.god_mode  # 每局重新按配置应用无敌（满22人后会自动解除）
 	upgrades = {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": float(TUNE.roll_cost), "photo_radius": 1.0, "riot_bonus": 0.0, "ball_size": 1.0}
-	up_levels = {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0, "riot_bonus": 0, "ball_size": 0}
+	up_levels = {"stamina_max": 0, "speed_mult": 0, "roll_cost": 0, "photo_radius": 0, "riot_bonus": 0, "ball_size": 0, "ball_count": 0}
 	p_pos = Vector2(WORLD.x / 2, FY1 - 6)
 	p_vel = Vector2.ZERO
 	p_face = Vector2(0, -1)
@@ -2107,7 +2161,7 @@ func _start_game() -> void:
 	for i in range(int(TUNE.base_security)): _spawn_security(false)
 	riot_npcs.clear(); riot_active = false
 	_spawn_idle_mascots()
-	ball_pos = Vector2(WORLD.x / 2.0, WORLD.y / 2.0); ball_vel = Vector2.ZERO; ball_kick_cd = 0.0
+	balls.clear(); _spawn_ball(Vector2(WORLD.x / 2.0, WORLD.y / 2.0))
 	confetti.clear(); flashes.clear(); chants.clear(); popups.clear()
 	gold_rain = 0.0; gold_rain_acc = 0.0
 	shake = 0; flash_alpha = 0; gold_flash = 0
