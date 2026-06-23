@@ -71,6 +71,26 @@ const MASCOT_QUIPS := [
 	"吉祥物：你礼貌吗",
 ]
 
+# 险险闪避保安时的解说（near-miss dodge）
+const DODGE_LINES := [
+	"MISS! 贴脸闪过！",
+	"电光石火的转身！",
+	"差一根头发丝！",
+	"他是不是开了挂？！",
+	"保安扑了个空！",
+	"丝滑小连招！",
+	"这反应速度逆天了！",
+]
+
+# 用足球撞翻 NPC 时的解说
+const BALL_HIT_LINES := [
+	"好球！直接撞翻！",
+	"任意球大师！",
+	"这脚力，C罗看了沉默！",
+	"保镖被一脚放倒了！",
+	"贴地斩！干净利落！",
+]
+
 # 开始页：目标号召文案
 const START_GOAL := "合照满 22 张，领取你专属的 WORLD CRASHER CUP！\nRUN FOR IT! GO! GO!"
 
@@ -96,11 +116,11 @@ static func default_tune() -> Dictionary:
 		"security_accel_elite": 0.085,
 		"fb_accel": 0.10,
 		# —— 镜头 ——
-		"camera_zoom": 1,        # 相机缩放：值越大画面越大（越近）；0.72 偏远，1.0 为 1:1
+		"camera_zoom": 1.3,        # 相机缩放：值越大画面越大（越近）；0.72 偏远，1.0 为 1:1
 		# —— 速度 ——
 		"player_base_speed": 2.6,
 		"sprint_mult": 1.8,
-		"sec_ratio": 0.80,          # 保安速度 = 主角基础速度 × 此比例（已调快）
+		"sec_ratio": 0.75,          # 保安速度 = 主角基础速度 × 此比例（已调快）
 		"sec_ratio_elite": 0.98,    # 精英几乎与主角同速
 		"star_speed": 2.5,
 		"common_speed": 1.9,
@@ -109,8 +129,8 @@ static func default_tune() -> Dictionary:
 		"common_stamina": 55.0,
 		# —— 保安 ——
 		"base_security": 5,         # 初始保安数量
-		"max_security": 60,         # 场上保安数量上限
-		"sec_spawn_interval_mult": 1.5,  # 保安生成间隔倍率（越大刷得越慢；1.5 = 比原来慢一半）
+		"max_security": 100,         # 场上保安数量上限
+		"sec_spawn_interval_mult": 2,  # 保安生成间隔倍率（越大刷得越慢；1.5 = 比原来慢一半）
 		"sec_separation_radius": 70.0,  # 保安互斥半径（避免重叠走同一条路）
 		"sec_separation_force": 0.9,    # 互斥强度
 		# —— 翻滚 ——
