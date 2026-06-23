@@ -138,6 +138,8 @@ const BALL_KICK := 11.0        # 触球后沿玩家朝向飞出的速度
 const BALL_FRICTION := 0.975   # 每帧滚动摩擦
 const BALL_STOP := 0.5         # 速度低于此值即停下
 const FALL_DUR := 300.0        # 被球撞翻后跌倒 5 秒（帧）
+const WAKE_DUR := 180.0        # 醒来后 3 秒内速度从慢逐渐恢复到原速
+const WAKE_MIN := 0.15         # 刚醒来瞬间的速度系数
 const NEAR_DIST := 40.0        # 距保安小于此值 = 进入“险境”
 const NEAR_CLEAR := 100.0      # 险境后再拉开到此距离 = 触发一次 MISS 闪避
 
@@ -670,7 +672,7 @@ func _make_footballer(is_star: bool, team: Dictionary, at_edge: bool) -> Diction
 		"chased": false, "chase_timer": 0.0,
 		"flee_radius": 175.0 if is_star else 100.0,
 		"stamina": smax, "exhausted": false, "exhaust_timer": 0.0,
-		"fallen": 0.0,
+		"fallen": 0.0, "groggy": 0.0,
 		"anim": "stand", "phase": 0.0,
 	}
 	player_id += 1
@@ -730,6 +732,7 @@ func _update_players(dt: float) -> void:
 		# 被足球撞翻：原地躺 5 秒，期间仍可被合影（活靶子）
 		if fp.fallen > 0:
 			fp.fallen -= dt
+			if fp.fallen <= 0: fp.groggy = WAKE_DUR   # 刚醒来：速度逐渐恢复
 			fp.fleeing = false
 			fp.vel *= 0.85
 			fp.pos = _clamp_field_v(fp.pos + fp.vel * dt, 12.0)
@@ -794,9 +797,10 @@ func _update_players(dt: float) -> void:
 		elif not want_flee:
 			fp.stamina = min(smax, fp.stamina + 0.5 * dt)
 
+		if fp.groggy > 0: fp.groggy -= dt
 		var target := ddir * dspeed
 		fp.vel += (target - fp.vel) * TUNE.fb_accel * dt
-		fp.pos = _clamp_field_v(fp.pos + fp.vel * dt, 12.0)
+		fp.pos = _clamp_field_v(fp.pos + fp.vel * _wake_mult(fp.groggy) * dt, 12.0)
 		_step_anim(fp, fp.vel.length(), dt)
 
 		if fp.chase_timer > 0: fp.chase_timer -= dt
@@ -862,6 +866,7 @@ func _spawn_security(elite: bool) -> void:
 		"flank": randf_range(-1.0, 1.0),  # 包抄偏移：让每个保安从不同角度逼近
 		"distract_target": null,           # 被狂热粉丝吸引的目标（仅最近 5 个会被赋值）
 		"fallen": 0.0,                     # 被足球撞翻后的跌倒计时
+		"groggy": 0.0,                     # 醒来后的恢复计时（期间减速）
 		"near": false,                     # 险境标记（用于 near-miss 闪避判定）
 		"anim": "stand", "phase": 0.0,
 	})
@@ -902,10 +907,12 @@ func _update_security(dt: float) -> void:
 		# 被足球撞翻：跌倒 5 秒，期间不动也抓不到人
 		if s.fallen > 0:
 			s.fallen -= dt
+			if s.fallen <= 0: s.groggy = WAKE_DUR   # 刚醒来：速度逐渐恢复
 			s.vel *= 0.86
 			s.pos = _clamp_world_v(s.pos + s.vel * dt, s.radius)
 			s.near = false
 			continue
+		if s.groggy > 0: s.groggy -= dt
 		if s.lunge_cd > 0: s.lunge_cd -= dt
 		var chasing_decoy := false
 		if s.state == "charge":
@@ -961,7 +968,7 @@ func _update_security(dt: float) -> void:
 				s.state = "charge"
 				s.timer = LUNGE_CHARGE
 				s.vel *= 0.3
-		s.pos = _clamp_world_v(s.pos + s.vel * dt, s.radius)
+		s.pos = _clamp_world_v(s.pos + s.vel * _wake_mult(s.groggy) * dt, s.radius)
 		_step_anim(s, s.vel.length(), dt)
 		var dnow: float = s.pos.distance_to(p_pos)
 		if not chasing_decoy and not p_rolling and not _invincible():
@@ -1000,6 +1007,12 @@ func _on_dodge() -> void:
 # 主角是否无敌（调试 god_mode 或 金牌·全场狂热期间）
 func _invincible() -> bool:
 	return god_mode or gold_invuln > 0.0
+
+# 醒来后的速度系数：刚醒(groggy=WAKE_DUR) → WAKE_MIN，3 秒后(groggy=0) → 1.0
+func _wake_mult(groggy: float) -> float:
+	if groggy <= 0.0:
+		return 1.0
+	return lerpf(WAKE_MIN, 1.0, 1.0 - groggy / WAKE_DUR)
 
 # 生成一个狂热粉丝：从世界边界外冲向场内一个随机点，抵达后转入乱窜
 func _spawn_riot_fan() -> void:
