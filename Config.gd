@@ -129,7 +129,7 @@ static func default_tune() -> Dictionary:
 		"common_stamina": 55.0,
 		# —— 保安 ——
 		"base_security": 5,         # 初始保安数量
-		"max_security": 100,         # 场上保安数量上限
+		"max_security": 66,         # 场上保安数量上限
 		"sec_spawn_interval_mult": 2,  # 保安生成间隔倍率（越大刷得越慢；1.5 = 比原来慢一半）
 		"sec_separation_radius": 70.0,  # 保安互斥半径（避免重叠走同一条路）
 		"sec_separation_force": 0.9,    # 互斥强度
