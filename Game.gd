@@ -1018,6 +1018,7 @@ func _trigger_riot() -> void:
 	var n: int = 3 + randi() % 3 + int(upgrades.riot_bonus)
 	for i in range(n):
 		_spawn_riot_fan()
+	_deliver_ball_to_player()
 
 # 金牌·全场狂热：30 名粉丝从四面冲场 + 天降彩带
 func _trigger_gold_riot() -> void:
@@ -1025,6 +1026,7 @@ func _trigger_gold_riot() -> void:
 	riot_timer = max(riot_timer, 700.0)
 	for i in range(30):
 		_spawn_riot_fan()
+	_deliver_ball_to_player()
 	gold_rain = 260.0
 	gold_rain_acc = 0.0
 	gold_flash = 1.0
@@ -1032,6 +1034,28 @@ func _trigger_gold_riot() -> void:
 	if cheer_player != null and cheer_player.stream != null and not GameConfig.DEBUG.mute_audio:
 		cheer_player.play()
 	_say("金牌·全场狂热！粉丝冲场啦！", Color("#ffd700"))
+
+# 狂热球迷登场后：若玩家附近没有球，就把最远的那颗球朝玩家踢过去（途中照样击晕 NPC）
+func _deliver_ball_to_player() -> void:
+	if balls.is_empty() or riot_npcs.is_empty():
+		return
+	var near_r := 300.0
+	for b in balls:
+		if b.pos.distance_to(p_pos) < near_r:
+			return   # 已经有球在身边了
+	# 选离玩家最远的一颗球，作为被踢向玩家的球
+	var far_b: Dictionary = balls[0]
+	var far_d := -1.0
+	for b in balls:
+		var d: float = b.pos.distance_to(p_pos)
+		if d > far_d: far_d = d; far_b = b
+	var to_p: Vector2 = p_pos - far_b.pos
+	var dist: float = to_p.length()
+	if dist < 1.0:
+		return
+	far_b.vel = (to_p / dist) * clampf(dist * 0.03, 9.0, 22.0)
+	far_b.kick_cd = 0.0
+	_spawn_popup(p_pos + Vector2(10, -p_radius - 16), "传球!", Color("#ffd740"))
 
 func _update_riot(dt: float) -> void:
 	if not riot_active: return
@@ -1367,11 +1391,6 @@ func _draw_sprite(tex: ImageTexture, pos: Vector2, w: float, h: float, flip: boo
 	draw_texture_rect(tex, Rect2(-w / 2.0, -h * 0.62 + bob, w, h), false, mod)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
-# 被撞翻角色头顶的“眩晕”星星
-func _draw_dizzy(pos: Vector2) -> void:
-	var a: float = 0.55 + 0.45 * sin(Time.get_ticks_msec() * 0.02)
-	draw_string(font, pos + Vector2(-14, 0), "★ ★", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(1.0, 0.9, 0.2, a))
-
 # 场上足球（经典黑白块）
 func _draw_balls() -> void:
 	var br: float = _ball_radius()
@@ -1476,10 +1495,9 @@ func _draw_footballers() -> void:
 			key = "porStar" if fp.is_star else "porCommon"
 		var w: float = 30.0 if fp.is_star else 24.0
 		var h: float = 44.0 if fp.is_star else 36.0
-		# 被撞翻：侧躺 + 眩晕星（仍可被合影）
+		# 被撞翻：侧躺（仍可被合影）
 		if fp.fallen > 0:
 			_draw_sprite(SPRITES[key]["stand"], fp.pos, w, h, false, 0.0, Color(0.85, 0.85, 0.85, 0.95), PI / 2.0)
-			_draw_dizzy(fp.pos + Vector2(0, -22))
 			if fp.being_photo:
 				draw_arc(fp.pos + Vector2(0, -4), 25, -PI / 2, -PI / 2 + (fp.progress / 60.0) * TAU, 24, Color("#00e5ff"), 3.0)
 			continue
@@ -1510,11 +1528,10 @@ func _draw_mini_bar(pos: Vector2, frac: float, w: float, exhausted: bool) -> voi
 
 func _draw_security() -> void:
 	for s in security:
-		# 被撞翻：侧躺 + 眩晕星
+		# 被撞翻：侧躺
 		if s.fallen > 0:
 			var fkey: String = "guardElite" if s.elite else "guard"
 			_draw_sprite(SPRITES[fkey]["stand"], s.pos, 26, 38, false, 0.0, Color(0.8, 0.8, 0.85, 0.95), PI / 2.0)
-			_draw_dizzy(s.pos + Vector2(0, -20))
 			continue
 		var scale := 1.0
 		var alpha := 1.0
@@ -1637,8 +1654,6 @@ func _draw_mascots() -> void:
 				_ptri_down(hx, hy + 6, 6.0, 3, Color("#ffb83a"))
 		# 名字
 		draw_string(font, c + Vector2(-34 + ox, -100 + oy), m.label, HORIZONTAL_ALIGNMENT_CENTER, 68, 18, m.name_col)
-		if fallen:
-			_draw_dizzy(c + Vector2(ox, -92 + oy))
 
 func _draw_player() -> void:
 	var p_frame: String = _dance_frame(p_phase) if _win_dancing() else p_anim
