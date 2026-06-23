@@ -62,6 +62,10 @@ var ball_pos := Vector2.ZERO
 var ball_vel := Vector2.ZERO
 var ball_kick_cd := 0.0
 
+# 金牌·全场狂热：天降彩带计时
+var gold_rain := 0.0
+var gold_rain_acc := 0.0
+
 # 玩家
 var p_pos := Vector2.ZERO
 var p_vel := Vector2.ZERO
@@ -90,6 +94,7 @@ var security: Array = []     # 保安
 var riot_npcs: Array = []
 var confetti: Array = []
 var flashes: Array = []      # 看台闪光灯
+var popups: Array = []       # 角色旁的小飘字（MISS! 等）
 
 var player_id := 1
 const MAX_PLAYERS := 14
@@ -500,6 +505,14 @@ func _process(delta: float) -> void:
 		_update_confetti(dt)
 		_update_flashes(dt)
 		_update_chants(dt)
+		_update_popups(dt)
+		# 金牌·全场狂热：持续一阵天降彩带
+		if gold_rain > 0:
+			gold_rain -= dt
+			gold_rain_acc += dt
+			if gold_rain_acc >= 8.0:
+				gold_rain_acc -= 8.0
+				_spawn_confetti_rain()
 		_update_danger()
 		cam.position = p_pos
 		if shake > 0:
@@ -972,31 +985,67 @@ func _add_riot(amount: float) -> void:
 		_trigger_riot()
 		p_riot = 0.0
 
-# 险险闪避保安：解说刷新 + 加分 + 涨狂热
+# 险险闪避保安：角色旁飘出 MISS! + 解说刷新 + 加分 + 涨狂热
 func _on_dodge() -> void:
 	score += 20
 	_add_riot(10.0)
+	_spawn_popup(p_pos + Vector2(10, -p_radius - 16), "MISS!", Color("#00e5ff"))
 	var lines: Array = GameConfig.DODGE_LINES
 	_say(lines[randi() % lines.size()], Color("#00e5ff"))
 	shake = max(shake, 6.0)
 	_check_upgrade()
+
+# 生成一个狂热粉丝：从世界边界外冲向场内一个随机点，抵达后转入乱窜
+func _spawn_riot_fan() -> void:
+	var edge := randi() % 4
+	var pos: Vector2
+	match edge:
+		0: pos = Vector2(randf() * WORLD.x, -30.0)
+		1: pos = Vector2(randf() * WORLD.x, WORLD.y + 30.0)
+		2: pos = Vector2(-30.0, randf() * WORLD.y)
+		_: pos = Vector2(WORLD.x + 30.0, randf() * WORLD.y)
+	var tgt := Vector2(FX0 + 120.0 + randf() * (FW - 240.0), FY0 + 120.0 + randf() * (FH - 240.0))
+	riot_npcs.append({
+		"pos": pos, "vel": Vector2.ZERO,
+		"dir": (tgt - pos).normalized(), "target": tgt, "mode": "rush", "wander": 0.0,
+		"spd": 3.2 + randf() * 1.6,
+		"anim": "stand", "phase": 0.0,
+	})
 
 func _trigger_riot() -> void:
 	riot_active = true
 	riot_timer = 480.0
 	var n: int = 3 + randi() % 3 + int(upgrades.riot_bonus)
 	for i in range(n):
-		riot_npcs.append({
-			"pos": Vector2(randf() * WORLD.x, randf() * WORLD.y), "vel": Vector2.ZERO,
-			"dir": Vector2(randf() - 0.5, randf() - 0.5).normalized(), "wander": 0.0,
-			"spd": 2.6 + randf() * 1.8,
-			"anim": "stand", "phase": 0.0,
-		})
+		_spawn_riot_fan()
+
+# 金牌·全场狂热：30 名粉丝从四面冲场 + 天降彩带
+func _trigger_gold_riot() -> void:
+	riot_active = true
+	riot_timer = max(riot_timer, 700.0)
+	for i in range(30):
+		_spawn_riot_fan()
+	gold_rain = 260.0
+	gold_rain_acc = 0.0
+	gold_flash = 1.0
+	shake = max(shake, 16.0)
+	if cheer_player != null and cheer_player.stream != null and not GameConfig.DEBUG.mute_audio:
+		cheer_player.play()
+	_say("金牌·全场狂热！粉丝冲场啦！", Color("#ffd700"))
 
 func _update_riot(dt: float) -> void:
 	if not riot_active: return
 	riot_timer -= dt
 	for r in riot_npcs:
+		# 冲场阶段：直线奔向场内目标点；抵达后转入乱窜引开保安
+		if r.mode == "rush":
+			r.dir = (r.target - r.pos).normalized()
+			r.pos = _clamp_world_v(r.pos + r.dir * float(r.spd) * dt, 10.0)
+			_step_anim(r, float(r.spd), dt)
+			if r.pos.distance_to(r.target) < 30.0:
+				r.mode = "loose"
+				r.wander = 0.0
+			continue
 		r.wander -= dt
 		# 狂暴的观众：高频变向 + 随机变速，毫无规律地乱窜
 		if r.wander <= 0:
@@ -1101,10 +1150,9 @@ func _ball_radius() -> float:
 func _update_ball(dt: float) -> void:
 	if ball_kick_cd > 0: ball_kick_cd -= dt
 	var br: float = _ball_radius()
-	# 玩家触球 → 沿朝向踢出
+	# 玩家触球 → 朝“朝向方向最近的 NPC”飞出（无目标则按朝向直飞）
 	if ball_kick_cd <= 0 and p_pos.distance_to(ball_pos) < p_radius + br:
-		var kd: Vector2 = p_face if p_face.length() > 0.01 else Vector2(0, -1)
-		ball_vel = kd.normalized() * BALL_KICK
+		ball_vel = _kick_dir() * BALL_KICK
 		ball_kick_cd = 18.0
 		shake = max(shake, 4.0)
 	if ball_vel.length() > BALL_STOP:
@@ -1151,6 +1199,55 @@ func _ball_knock(pos: Vector2) -> void:
 	_spawn_confetti(pos)
 	var lines: Array = GameConfig.BALL_HIT_LINES
 	_say(lines[randi() % lines.size()], Color("#ffd740"))
+
+# 踢球方向：朝玩家朝向 120° 锥形内最近的 NPC；没有就按朝向直飞
+func _kick_dir() -> Vector2:
+	var face: Vector2 = p_face if p_face.length() > 0.01 else Vector2(0, -1)
+	face = face.normalized()
+	var has := false
+	var best_pos := Vector2.ZERO
+	var best_d := INF
+	for s in security:
+		if s.fallen > 0: continue
+		var v: Vector2 = s.pos - ball_pos
+		var d: float = v.length()
+		if d > 1.0 and face.dot(v / d) > 0.5 and d < best_d:
+			best_d = d; best_pos = s.pos; has = true
+	for fp in players:
+		if fp.leaving or fp.fallen > 0: continue
+		var v2: Vector2 = fp.pos - ball_pos
+		var d2: float = v2.length()
+		if d2 > 1.0 and face.dot(v2 / d2) > 0.5 and d2 < best_d:
+			best_d = d2; best_pos = fp.pos; has = true
+	for m in mascots:
+		if m.state == "idle" or m.fallen > 0: continue
+		var v3: Vector2 = m.pos - ball_pos
+		var d3: float = v3.length()
+		if d3 > 1.0 and face.dot(v3 / d3) > 0.5 and d3 < best_d:
+			best_d = d3; best_pos = m.pos; has = true
+	if has:
+		return (best_pos - ball_pos).normalized()
+	return face
+
+# ----------------------------------------------------------------------------
+# 角色旁的小飘字（MISS! 等）
+# ----------------------------------------------------------------------------
+func _spawn_popup(pos: Vector2, text: String, color: Color) -> void:
+	popups.append({"pos": pos, "text": text, "color": color, "life": 50.0})
+
+func _update_popups(dt: float) -> void:
+	for i in range(popups.size() - 1, -1, -1):
+		var p: Dictionary = popups[i]
+		p.pos.y -= 0.7 * dt
+		p.life -= dt
+		if p.life <= 0: popups.remove_at(i)
+
+func _draw_popups() -> void:
+	for p in popups:
+		var a: float = clampf(p.life / 50.0, 0.0, 1.0)
+		var col: Color = p.color
+		col.a = a
+		draw_string(font, p.pos, p.text, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, col)
 
 # ----------------------------------------------------------------------------
 # 粒子 / 表现
@@ -1229,6 +1326,7 @@ func _draw() -> void:
 	_draw_mascots()
 	_draw_player()
 	_draw_confetti()
+	_draw_popups()
 
 func _draw_sprite(tex: ImageTexture, pos: Vector2, w: float, h: float, flip: bool, bob: float, mod: Color = Color.WHITE, rot: float = 0.0) -> void:
 	draw_set_transform(pos, rot, Vector2(-1.0 if flip else 1.0, 1.0))
@@ -1925,21 +2023,37 @@ func _show_upgrade() -> void:
 		{"label": "足球变大 1 倍", "key": "ball_size"},
 	]
 	choices.shuffle()
-	for i in range(2):
-		var ch: Dictionary = choices[i]
+	# 组装 4 个可选项；5% 概率混入“金牌·全场狂热”稀有卡
+	var shown: Array = []
+	if randf() < 0.05:
+		shown.append({"label": "★ 金牌·全场狂热 ★", "key": "gold_card", "gold": true})
+		for i in range(3): shown.append(choices[i])
+	else:
+		for i in range(4): shown.append(choices[i])
+	shown.shuffle()
+	for ch in shown:
+		var is_gold: bool = ch.get("gold", false)
 		var b := _menu_button(ch.label)
-		b.custom_minimum_size = Vector2(300, 52)
+		b.custom_minimum_size = Vector2(320, 50)
 		var sb := StyleBoxFlat.new()
-		sb.bg_color = Color("#1b5e20")
+		sb.bg_color = Color("#7a5c00") if is_gold else Color("#1b5e20")
 		sb.set_corner_radius_all(10)
-		sb.set_border_width_all(2)
-		sb.border_color = Color("#4caf50")
+		sb.set_border_width_all(3 if is_gold else 2)
+		sb.border_color = Color("#ffd700") if is_gold else Color("#4caf50")
 		b.add_theme_stylebox_override("normal", sb)
+		if is_gold:
+			b.add_theme_color_override("font_color", Color("#ffe680"))
 		var key: String = ch.key
 		b.pressed.connect(func(): _apply_upgrade(key))
 		upgrade_box.add_child(b)
 
 func _apply_upgrade(key: String) -> void:
+	# 稀有金牌：不加永久属性，触发全场狂热（30 粉丝冲场 + 天降彩带）
+	if key == "gold_card":
+		_trigger_gold_riot()
+		panel_upgrade.visible = false
+		state = St.PLAY
+		return
 	match key:
 		"stamina_max":
 			upgrades.stamina_max += 30; p_stamina = upgrades.stamina_max
@@ -1994,7 +2108,8 @@ func _start_game() -> void:
 	riot_npcs.clear(); riot_active = false
 	_spawn_idle_mascots()
 	ball_pos = Vector2(WORLD.x / 2.0, WORLD.y / 2.0); ball_vel = Vector2.ZERO; ball_kick_cd = 0.0
-	confetti.clear(); flashes.clear(); chants.clear()
+	confetti.clear(); flashes.clear(); chants.clear(); popups.clear()
+	gold_rain = 0.0; gold_rain_acc = 0.0
 	shake = 0; flash_alpha = 0; gold_flash = 0
 	cam.position = p_pos
 	cam.reset_smoothing()
