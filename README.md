@@ -70,3 +70,21 @@ goal-crasher/
 玩家移动惯性 / 冲刺 / 翻滚无敌帧 / 体力力竭；球员全员逃跑 + 体力槽（球星更难抓）+ 无限补充；
 保安寻路追击 + 蓄力飞扑三段式 + 尸海 + 精英预判；暴动时间引开保安；Roguelite 升级二选一 + 无尽阈值；
 写实球场标线 + 可走动跑道；相机缩放/震屏、辉光、像素跑动弹跳、纸屑、解说、危机泛红。
+
+## 七、资源署名 / Credits
+
+本游戏使用了以下第三方资源，按各自许可署名：
+
+### 音效
+- **相机快门 / Camera shutter** by *furryfemboyuwu* — https://freesound.org/s/754876/ — License: **Attribution 4.0 (CC BY 4.0)**
+- **观众欢呼 / Cheering (Lech Poznań)** by *Marek97PL* — freesound.org — License: **Creative Commons 0 (CC0，公有领域)**
+
+### 音乐
+- **Bring It On** by *Airstream* — via **Uppbeat** — https://uppbeat.io/t/airstream/bring-it-on — License code: `EBY4PK9YBICCOIKK`
+  - 署名文案（Uppbeat 要求）：`Music from #Uppbeat (free for Creators!): https://uppbeat.io/t/airstream/bring-it-on  License code: EBY4PK9YBICCOIKK`
+  - 注：Uppbeat 免费许可面向创作者；若日后用于公司/付费推广，请按其条款升级 Uppbeat Pro。
+
+### 字体
+- **Zpix（最像素）** by *SolidZORO* — https://github.com/SolidZORO/zpix-pixel-font — 开源免费字体（具体许可以仓库 `LICENSE` 为准）
+
+> 角色/队伍/奖杯均为原创戏仿，不含真实球星姓名、FIFA 或「世界杯」等受保护标识。

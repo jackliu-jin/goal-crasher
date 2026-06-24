@@ -1,5 +1,5 @@
 extends Node2D
-## Pitch Invader: World Cup Craze — Godot 4.x 版
+## 冲场之王·冲场模拟器 — Godot 4.x 版
 ## 单脚本实现：世界绘制(_draw) + 逻辑(_process) + 代码构建 UI。
 ## 像素风沿用，叠加 Godot 的相机缩放/震屏、辉光环境、粒子化纸屑等润色。
 
@@ -1982,7 +1982,7 @@ func _build_panels() -> void:
 	emph.add_theme_constant_override("outline_size", 7)
 	emph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(emph)
-	var desc := _mk_label("冲入决赛球场，疯狂和球员合影刷分！球员源源不断登场，撑到被保安逮捕为止。\n大牌球星(10/7号)会逃跑，贴脸抓住强制合影得双倍分。\nWASD移动，Shift冲刺，Space翻滚；移动端用左摇杆+右按钮。", 22, Color(1, 1, 1, 0.85))
+	var desc := _mk_label("冲入世冲杯决赛球场，疯狂和球员合影刷分！球员源源不断登场，撑到被保安逮捕为止。\n大牌球星(10/7号)会逃跑，贴脸抓住强制合影得双倍分。\nWASD移动，Shift冲刺，Space翻滚；移动端用左摇杆+右按钮。", 22, Color(1, 1, 1, 0.85))
 	desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	desc.custom_minimum_size = Vector2(620, 0)
 	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -2005,6 +2005,13 @@ func _build_panels() -> void:
 	howto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	panel_start.add_child(howto)
 	_place(howto, 1, 0.5, 1, 0.5, -344, -110, -16, 110)
+	# 资源署名（贴底部，小字）
+	var credits := _mk_label(GameConfig.CREDITS, 13, Color(1, 1, 1, 0.5))
+	credits.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	credits.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	credits.add_theme_constant_override("outline_size", 2)
+	panel_start.add_child(credits)
+	_place(credits, 0, 1, 1, 1, 16, -44, -16, -6)
 
 	panel_upgrade = _overlay()
 	panel_upgrade.visible = false

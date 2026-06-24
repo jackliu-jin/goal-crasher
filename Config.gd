@@ -41,7 +41,7 @@ const STAR_PHOTO_LINES := [
 	"他抓住了今晚最大的鱼！",
 	"球星都拦不住他的热情！",
 	"球星已老实！",
-	"梅罗都绷不住了！",
+	"梅老板和总裁都绷不住了！",
 ]
 
 # 每合影 N 人的里程碑播报（%d 会替换成人数）
@@ -86,13 +86,13 @@ const DODGE_LINES := [
 const BALL_HIT_LINES := [
 	"好球！直接撞翻！",
 	"任意球大师！",
-	"这脚力，C罗看了沉默！",
+	"这脚力，总裁看了沉默！",
 	"保镖被一脚放倒了！",
 	"贴地斩！干净利落！",
 ]
 
 # 开始页：目标号召文案
-const START_GOAL := "合照满 22 张，领取你专属的 WORLD CRASHER CUP！\nRUN FOR IT! GO! GO!"
+const START_GOAL := "合照满 22 张，领取你专属的世冲杯奖杯 WORLD CRASHER CUP！\nRUN FOR IT! GO! GO!"
 
 # 玩法提示（开始页 + 被捕结算页展示）
 const HOW_TO_PLAY := "玩法提示\n· Shift 冲刺：跑得更快\n· 空格翻滚：有无敌帧，能穿过保安\n· 踢足球：把保安和球星撞晕\n· 狂热值满：狂热球迷一起冲场，帮你引开保安"
@@ -105,7 +105,10 @@ const WIN_HINT := "截图分享吧！"
 const SHARE_HINT := "扫码分享给小伙伴"
 
 # 看台助威字幕
-const CHANT_TEXTS := ["OLE OLE!", "VAMOS!","我爱C罗！","我爱梅西！", "一起合影!", "MESSI!", "加油!", "CR7!","jajajajaja","OMG!","WTF!","我也想合影","我要下去了！","WATCH OUT!"]
+const CHANT_TEXTS := ["OLE OLE!", "VAMOS!","我爱总裁！","我爱梅老板！", "一起合影!", "梅老板!", "加油!", "总裁!","jajajajaja","OMG!","WTF!","我也想合影","我要下去了！","WATCH OUT!"]
+
+# 资源署名（音效/音乐/字体许可声明，开始页底部展示，完整版见 README）
+const CREDITS := "音效 相机快门 by furryfemboyuwu (freesound.org/s/754876, CC BY 4.0)　·　观众欢呼 by Marek97PL (freesound.org, CC0)　·　音乐 Bring It On by Airstream (Uppbeat)　·　字体 Zpix 最像素 by SolidZORO"
 
 # ============================================================================
 # 可调数值参数（debug 调参的单一来源）
