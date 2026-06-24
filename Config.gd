@@ -111,6 +111,13 @@ const CHANT_TEXTS := ["OLE OLE!", "VAMOS!","我爱总裁！","我爱梅老板！
 const CREDITS := "音效 相机快门 by furryfemboyuwu (freesound.org/s/754876, CC BY 4.0)　·　观众欢呼 by Marek97PL (freesound.org, CC0)　·　音乐 Bring It On by Airstream (Uppbeat)　·　字体 Zpix 最像素 by SolidZORO"
 
 # ============================================================================
+# 排行榜 / 统计后端（Supabase REST）
+# publishable key 是“前端公开 key”，按设计可公开，提交进仓库无安全风险。
+# ============================================================================
+const SUPABASE_URL := "https://bugsfeaazdccqleplrce.supabase.co/rest/v1"
+const SUPABASE_KEY := "sb_publishable_3bqDZ9brB9GXF3cY76mTHQ_cdZLlml6"
+
+# ============================================================================
 # 可调数值参数（debug 调参的单一来源）
 # 返回一份全新的字典，便于运行时被调试面板修改而不污染常量
 # ============================================================================

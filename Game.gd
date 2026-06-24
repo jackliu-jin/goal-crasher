@@ -56,6 +56,7 @@ var next_upgrade_at := 1000
 var god_mode := false
 var survive_acc := 0.0       # 存活计分累积器：每满 60 帧(1秒) +10 分
 var dodge_cd := 0.0          # 险险闪避的全局冷却，避免一瞬间重复触发
+var win_clear_ms := 0        # 集齐第 22 张照片的用时（毫秒），用于排行榜
 
 # 足球（可多颗）：每颗 {"pos": Vector2, "vel": Vector2, "kick_cd": float}
 var balls: Array = []
@@ -177,6 +178,7 @@ var lbl_over_quip: Label
 var lbl_over_hint: Label
 var lbl_over_no: Label
 var lbl_over_howto: Label
+var lbl_leaderboard: Label
 var qr_rect: TextureRect
 var trophy_rect: TextureRect
 var win_glow_rect: TextureRect
@@ -818,6 +820,8 @@ func _complete_photo(fp: Dictionary) -> void:
 	fp.fleeing = false
 	fp.dir = _nearest_edge_dir(fp.pos)
 	photographed += 1
+	if photographed == GameConfig.WIN_GOAL:
+		win_clear_ms = int(elapsed / 60.0 * 1000.0)   # 集齐 22 张的用时，记入排行榜
 	# 调试：开了无敌时，刷满 22 人后自动解除无敌，方便测试胜利结算
 	if god_mode and photographed >= GameConfig.WIN_GOAL:
 		god_mode = false
@@ -2072,6 +2076,11 @@ func _build_panels() -> void:
 	lbl_over_hint = _mk_label("", 22, Color("#9fe0ff"))
 	lbl_over_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ov.add_child(lbl_over_hint)
+	# 今日最快榜（仅胜利页显示，内容由 Supabase 异步填充）
+	lbl_leaderboard = _mk_label("", 18, Color("#ffe08a"))
+	lbl_leaderboard.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_leaderboard.visible = false
+	ov.add_child(lbl_leaderboard)
 	var rb := _menu_button("再次冲场")
 	ov.add_child(rb)
 	rb.pressed.connect(_start_game)
@@ -2231,7 +2240,7 @@ func _say(text: String, color: Color) -> void:
 # ----------------------------------------------------------------------------
 func _start_game() -> void:
 	score = 0; elapsed = 0; photographed = 0; next_upgrade_at = 1000
-	survive_acc = 0.0; dodge_cd = 0.0
+	survive_acc = 0.0; dodge_cd = 0.0; win_clear_ms = 0
 	won = false
 	god_mode = GameConfig.DEBUG.god_mode  # 每局重新按配置应用无敌（满22人后会自动解除）
 	upgrades = {"stamina_max": 100.0, "speed_mult": 1.0, "roll_cost": float(TUNE.roll_cost), "photo_radius": 1.0, "photo_speed": 1.0, "riot_bonus": 0.0, "ball_size": 1.0}
@@ -2298,6 +2307,7 @@ func _game_over(by: String = "security") -> void:
 		lbl_over_hint.text = ""
 		trophy_rect.visible = false
 	panel_over.visible = true
+	_report_stats()   # 上报本局时长 +（胜利时）记录排行榜并拉取今日榜
 
 func crowdRoar_win() -> void:
 	# 胜利时炸一波纸屑 + 屏震
@@ -2345,6 +2355,88 @@ func _share_result() -> void:
 })();
 """ % pj
 	JavaScriptBridge.eval(js, true)
+
+# ----------------------------------------------------------------------------
+# 排行榜 / 统计（Supabase REST）
+# ----------------------------------------------------------------------------
+func _fmt_ms(ms: int) -> String:
+	var s: int = int(ms / 1000.0)
+	return "%02d:%02d" % [s / 60, s % 60]
+
+# 今天 00:00（北京时间）对应的 UTC 时间字符串，用于“今日榜”过滤
+func _today_start_iso() -> String:
+	var now: int = int(Time.get_unix_time_from_system())
+	var bj: int = now + 8 * 3600
+	var day_start_utc: int = (bj / 86400) * 86400 - 8 * 3600
+	return Time.get_datetime_string_from_unix_time(day_start_utc)
+
+func _supabase_headers(write: bool) -> PackedStringArray:
+	var h := PackedStringArray([
+		"apikey: " + GameConfig.SUPABASE_KEY,
+		"Authorization: Bearer " + GameConfig.SUPABASE_KEY,
+	])
+	if write:
+		h.append("Content-Type: application/json")
+		h.append("Prefer: return=minimal")
+	return h
+
+func _supabase_post(path: String, body: Dictionary, on_done: Callable = Callable()) -> void:
+	var http := HTTPRequest.new()
+	add_child(http)
+	http.request_completed.connect(func(_r, _c, _h, _b):
+		http.queue_free()
+		if on_done.is_valid(): on_done.call()
+	)
+	var err := http.request(GameConfig.SUPABASE_URL + path, _supabase_headers(true), HTTPClient.METHOD_POST, JSON.stringify(body))
+	if err != OK:
+		http.queue_free()
+		if on_done.is_valid(): on_done.call()
+
+# 结算上报：每局都记一条 session；胜利再记一条 win 并拉取今日榜
+func _report_stats() -> void:
+	if not OS.has_feature("web"):
+		return
+	var played_ms: int = int(elapsed / 60.0 * 1000.0)
+	_supabase_post("/sessions", {"played_ms": played_ms, "photos": photographed, "won": won})
+	if won:
+		var cms: int = win_clear_ms if win_clear_ms > 0 else played_ms
+		_supabase_post("/wins", {"serial": _win_serial_no(), "clear_ms": cms}, _fetch_leaderboard)
+		if lbl_leaderboard != null:
+			lbl_leaderboard.visible = true
+			lbl_leaderboard.text = "今日最快榜 加载中…"
+	elif lbl_leaderboard != null:
+		lbl_leaderboard.visible = false
+
+func _fetch_leaderboard() -> void:
+	var http := HTTPRequest.new()
+	add_child(http)
+	http.request_completed.connect(_on_leaderboard.bind(http))
+	var url := GameConfig.SUPABASE_URL + "/wins?select=serial,clear_ms&created_at=gte." + _today_start_iso().uri_encode() + "&order=clear_ms.asc&limit=5"
+	var err := http.request(url, _supabase_headers(false), HTTPClient.METHOD_GET)
+	if err != OK:
+		http.queue_free()
+		if lbl_leaderboard != null: lbl_leaderboard.text = "今日最快榜（暂不可用）"
+
+func _on_leaderboard(_result: int, code: int, _headers: PackedStringArray, body: PackedByteArray, http: HTTPRequest) -> void:
+	http.queue_free()
+	if lbl_leaderboard == null: return
+	if code != 200:
+		lbl_leaderboard.text = "今日最快榜（加载失败）"
+		return
+	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var lines := PackedStringArray(["—— 今日最快榜 ——"])
+	if typeof(data) == TYPE_ARRAY and not (data as Array).is_empty():
+		var my_serial := _win_serial_no()
+		var rank := 0
+		for row in data:
+			rank += 1
+			var serial: String = str(row.get("serial", "NO. ?"))
+			var mark := "  ←你" if serial == my_serial else ""
+			lines.append("%d. %s  %s%s" % [rank, serial, _fmt_ms(int(row.get("clear_ms", 0))), mark])
+	else:
+		lines.append("暂无记录，你就是今天第一个！")
+	lines.append("你的用时 %s" % _fmt_ms(win_clear_ms))
+	lbl_leaderboard.text = "\n".join(lines)
 
 func _update_hud() -> void:
 	lbl_score.text = str(score)
