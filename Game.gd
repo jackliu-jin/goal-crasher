@@ -1390,7 +1390,7 @@ func _update_flashes(dt: float) -> void:
 func _update_chants(dt: float) -> void:
 	chant_timer -= dt
 	if chant_timer <= 0:
-		chant_timer = 90.0 + randf() * 120.0
+		chant_timer = 30.0 + randf() * 45.0
 		var top := randf() < 0.5
 		chants.append({"pos": Vector2(randf() * WORLD.x, -40.0 if top else WORLD.y + 50), "text": GameConfig.CHANT_TEXTS[randi() % GameConfig.CHANT_TEXTS.size()], "life": 90.0})
 	for i in range(chants.size() - 1, -1, -1):
