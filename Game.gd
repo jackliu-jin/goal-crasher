@@ -2075,6 +2075,9 @@ func _build_panels() -> void:
 	var rb := _menu_button("再次冲场")
 	ov.add_child(rb)
 	rb.pressed.connect(_start_game)
+	var sb_share := _menu_button("📲 分享给好友")
+	ov.add_child(sb_share)
+	sb_share.pressed.connect(_share_result)
 	# 玩家编号：放在右侧奖杯正下方
 	lbl_over_no = _mk_label("", 20, Color("#ffd700"))
 	lbl_over_no.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2313,6 +2316,35 @@ func _win_serial_no() -> String:
 	if diff < 0: diff = 0
 	var part2 := int(diff / 100)
 	return "NO. 1014%06d" % part2
+
+# 结算一键分享：移动端唤起原生分享面板，否则复制文案到剪贴板（再兜底 prompt）
+func _share_result() -> void:
+	var msg: String
+	if won:
+		msg = "我在《冲场之王·冲场模拟器》冲场成功！合影满 %d 张拿到世冲杯，编号 %s。你也来挑战！" % [photographed, _win_serial_no()]
+	else:
+		msg = "我在《冲场之王·冲场模拟器》合影了 %d 张、得分 %d 才被抓，你能撑多久？快来试试！" % [photographed, score]
+	if not OS.has_feature("web"):
+		_say("分享文案已生成（仅网页版可一键分享）", Color("#9fe0ff"))
+		return
+	var pj := JSON.stringify({"title": "冲场之王·冲场模拟器", "text": msg})
+	var js := """
+(function(){
+  var d = %s;
+  d.url = location.origin + location.pathname;
+  function copyFallback(){
+    var s = d.text + ' ' + d.url;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(s).then(function(){ alert('已复制分享文案，去微信/抖音/朋友圈粘贴发给好友吧！'); }, function(){ window.prompt('复制下面文字分享给好友：', s); });
+    } else { window.prompt('复制下面文字分享给好友：', s); }
+  }
+  try {
+    if (navigator.share) { navigator.share(d).catch(function(){ copyFallback(); }); }
+    else { copyFallback(); }
+  } catch(e){ copyFallback(); }
+})();
+""" % pj
+	JavaScriptBridge.eval(js, true)
 
 func _update_hud() -> void:
 	lbl_score.text = str(score)
