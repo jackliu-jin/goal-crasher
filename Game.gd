@@ -182,6 +182,7 @@ var lbl_over_stats: Label
 var lbl_over_quip: Label
 var lbl_over_hint: Label
 var lbl_over_no: Label
+var lbl_over_howto: Label
 var qr_rect: TextureRect
 var trophy_rect: TextureRect
 var win_glow_rect: TextureRect
@@ -1981,7 +1982,7 @@ func _build_panels() -> void:
 	panel_start = _overlay()
 	var v := _center_box()
 	panel_start.add_child(v)
-	v.add_child(_mk_label("Goal Crasher 冲场之王", 30, Color("#ffd700")))
+	v.add_child(_mk_label("冲场之王·冲场模拟器", 30, Color("#ffd700")))
 	# 加粗强调行（Zpix 像素字体无独立粗体，用更大字号 + 更粗描边模拟"加粗"）
 	var emph := _mk_label("挑战更多的合影！更多的疯狂！", 24, Color("#ffd700"))
 	emph.add_theme_constant_override("outline_size", 7)
@@ -1996,8 +1997,16 @@ func _build_panels() -> void:
 	goal.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	goal.add_theme_constant_override("outline_size", 6)
 	v.add_child(goal)
-	var tip := _mk_label("📱 建议横屏游玩", 20, Color("#9fe0ff"))
+	# 玩法提示
+	var howto := _mk_label(GameConfig.HOW_TO_PLAY, 21, Color("#cfe9ff"))
+	howto.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	howto.custom_minimum_size = Vector2(620, 0)
+	howto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	v.add_child(howto)
+	# 横屏提示（放大加粗，提醒手机玩家务必横屏）
+	var tip := _mk_label("📱 强烈建议横屏游玩！", 30, Color("#ffd24a"))
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tip.add_theme_constant_override("outline_size", 7)
 	v.add_child(tip)
 	var btn := _menu_button("开始冲场")
 	v.add_child(btn)
@@ -2065,6 +2074,12 @@ func _build_panels() -> void:
 	lbl_over_no = _mk_label("", 22, Color("#ffd700"))
 	lbl_over_no.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ov.add_child(lbl_over_no)
+	# 玩法提示（仅被捕结算页显示，胜利页隐藏）
+	lbl_over_howto = _mk_label(GameConfig.HOW_TO_PLAY, 20, Color("#cfe9ff"))
+	lbl_over_howto.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_over_howto.custom_minimum_size = Vector2(640, 0)
+	lbl_over_howto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ov.add_child(lbl_over_howto)
 	var rb := _menu_button("再次冲场")
 	ov.add_child(rb)
 	rb.pressed.connect(_start_game)
@@ -2253,6 +2268,7 @@ func _game_over(by: String = "security") -> void:
 	win_glow_rect.visible = won           # 胜利时显示金色暗角
 	if touch_root != null: touch_root.visible = false   # 结算时隐藏摇杆/按钮
 	lbl_over_no.visible = won
+	lbl_over_howto.visible = not won      # 玩法提示只在被捕页显示
 	if won:
 		# 胜利：抓满 22 人后被抓
 		lbl_over_title.add_theme_color_override("font_color", Color("#ffd700"))

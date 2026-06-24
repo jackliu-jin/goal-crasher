@@ -94,6 +94,9 @@ const BALL_HIT_LINES := [
 # 开始页：目标号召文案
 const START_GOAL := "合照满 22 张，领取你专属的 WORLD CRASHER CUP！\nRUN FOR IT! GO! GO!"
 
+# 玩法提示（开始页 + 被捕结算页展示）
+const HOW_TO_PLAY := "玩法提示\n· Shift 冲刺：跑得更快\n· 空格翻滚：有无敌帧，能穿过保安\n· 踢足球：把保安和球星撞晕\n· 狂热值满：狂热球迷一起冲场，帮你引开保安"
+
 # 抓满 22 人后被抓 = 胜利
 const WIN_GOAL := 22
 const WIN_TITLE := "WIN! 你就是真正的冲场之王！"
