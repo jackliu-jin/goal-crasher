@@ -132,14 +132,8 @@ const MASCOT_AIM := 32.0       # 冲锋前的瞄准预警（约 0.5s）
 const MASCOT_RADIUS := 26.0    # 普通保安(13)的两倍
 const MASCOT_SCATTER := 60.0   # 冲锋时冲散保安的半径
 
-# ---------- 足球 / 闪避 / 跌倒 ----------
-const BALL_RADIUS := 11.0      # 基础半径（被“足球变大”升级翻倍）
-const BALL_KICK := 11.0        # 触球后沿玩家朝向飞出的速度
-const BALL_FRICTION := 0.975   # 每帧滚动摩擦
-const BALL_STOP := 0.5         # 速度低于此值即停下
-const FALL_DUR := 300.0        # 被球撞翻后跌倒 5 秒（帧）
-const WAKE_DUR := 180.0        # 醒来后 3 秒内速度从慢逐渐恢复到原速
-const WAKE_MIN := 0.15         # 刚醒来瞬间的速度系数
+# ---------- 足球 / 闪避 / 跌倒（多数数值已移到 Config.default_tune()）----------
+const BALL_STOP := 0.5         # 足球速度低于此值即停下（内部阈值）
 const NEAR_DIST := 40.0        # 距保安小于此值 = 进入“险境”
 const NEAR_CLEAR := 100.0      # 险境后再拉开到此距离 = 触发一次 MISS 闪避
 
@@ -495,10 +489,10 @@ func _process(delta: float) -> void:
 		survive_acc += dt
 		while survive_acc >= 60.0:
 			survive_acc -= 60.0
-			score += 10
+			score += int(TUNE.survive_score_per_sec)
 		_check_upgrade()
-		# 狂热被动回涨：每秒 +5
-		_add_riot((5.0 / 60.0) * dt)
+		# 狂热被动回涨
+		_add_riot((float(TUNE.riot_regen_per_sec) / 60.0) * dt)
 		_update_player(dt)
 		_update_players(dt)
 		_refill_players(dt)
@@ -719,7 +713,7 @@ func _refill_players(dt: float) -> void:
 			players.append(_make_footballer(false, _random_team(), true))
 
 func _update_players(dt: float) -> void:
-	var photo_range: float = 50.0 * upgrades.photo_radius
+	var photo_range: float = float(TUNE.photo_base_range) * upgrades.photo_radius
 	for i in range(players.size() - 1, -1, -1):
 		var fp: Dictionary = players[i]
 		if fp.leaving:
@@ -733,7 +727,7 @@ func _update_players(dt: float) -> void:
 		# 被足球撞翻：原地躺 5 秒，期间仍可被合影（活靶子）
 		if fp.fallen > 0:
 			fp.fallen -= dt
-			if fp.fallen <= 0: fp.groggy = WAKE_DUR   # 刚醒来：速度逐渐恢复
+			if fp.fallen <= 0: fp.groggy = float(TUNE.wake_duration)   # 刚醒来：速度逐渐恢复
 			fp.fleeing = false
 			fp.vel *= 0.85
 			fp.pos = _clamp_field_v(fp.pos + fp.vel * dt, 12.0)
@@ -742,7 +736,7 @@ func _update_players(dt: float) -> void:
 			if fdist < photo_range and not p_rolling:
 				fp.being_photo = true
 				fp.progress += 1.3 * float(upgrades.photo_speed) * dt
-				if fp.progress >= 60:
+				if fp.progress >= float(TUNE.photo_frames):
 					_complete_photo(fp)
 			else:
 				fp.being_photo = false
@@ -811,7 +805,7 @@ func _update_players(dt: float) -> void:
 		if in_range:
 			fp.being_photo = true
 			fp.progress += (1.3 if grabbed else 1.0) * float(upgrades.photo_speed) * dt
-			if fp.progress >= 60:
+			if fp.progress >= float(TUNE.photo_frames):
 				_complete_photo(fp)
 		else:
 			fp.being_photo = false
@@ -828,7 +822,7 @@ func _complete_photo(fp: Dictionary) -> void:
 	if god_mode and photographed >= GameConfig.WIN_GOAL:
 		god_mode = false
 		_say("【调试】已合影 %d 人，无敌解除——去触发胜利吧！" % photographed, Color("#ff6b6b"))
-	var base: int = 400 if fp.is_star else 150
+	var base: int = int(TUNE.star_score) if fp.is_star else int(TUNE.photo_score)
 	var mult := 2 if fp.chased else 1
 	score += base * mult
 	_spawn_confetti(fp.pos)
@@ -840,7 +834,7 @@ func _complete_photo(fp: Dictionary) -> void:
 	_say(lines[randi() % lines.size()], Color("#ffd700") if fp.is_star else Color.WHITE)
 	p_combo += 1
 	p_combo_timer = 180.0
-	_add_riot(35.0 if fp.is_star else 18.0)
+	_add_riot(float(TUNE.riot_star_gain) if fp.is_star else float(TUNE.riot_photo_gain))
 	if photographed % GameConfig.MILESTONE_EVERY == 0:
 		_say(GameConfig.MILESTONE_TEMPLATE % photographed, Color("#ffd700"))
 	_check_upgrade()
@@ -876,7 +870,7 @@ func _update_security(dt: float) -> void:
 	sec_spawn_timer -= dt
 	if dodge_cd > 0: dodge_cd -= dt
 	var speed_bonus := int((upgrades.speed_mult - 1.0) * 8)
-	var target_count: int = int(TUNE.base_security) + int(elapsed / 15.0) + int(score / 1000.0) + speed_bonus + int(photographed / 6.0)
+	var target_count: int = int(TUNE.base_security) + int(elapsed / float(TUNE.sec_grow_time)) + int(score / float(TUNE.sec_grow_score)) + speed_bonus + int(photographed / float(TUNE.sec_grow_photo))
 	if security.size() < min(target_count, int(TUNE.max_security)) and sec_spawn_timer <= 0:
 		_spawn_security(elapsed > 60 and randf() < 0.3)
 		# 生成间隔乘以 config 里的倍率（>1 = 刷得更慢）
@@ -897,7 +891,7 @@ func _update_security(dt: float) -> void:
 			if nn != null and nd < 320.0:
 				cands.append({"s": s, "npc": nn, "d": nd})
 		cands.sort_custom(func(a, b): return a.d < b.d)
-		for i in range(min(5, cands.size())):
+		for i in range(min(int(TUNE.riot_distract_count), cands.size())):
 			var entry: Dictionary = cands[i]
 			var g: Dictionary = entry.s
 			g.distract_target = entry.npc
@@ -908,7 +902,7 @@ func _update_security(dt: float) -> void:
 		# 被足球撞翻：跌倒 5 秒，期间不动也抓不到人
 		if s.fallen > 0:
 			s.fallen -= dt
-			if s.fallen <= 0: s.groggy = WAKE_DUR   # 刚醒来：速度逐渐恢复
+			if s.fallen <= 0: s.groggy = float(TUNE.wake_duration)   # 刚醒来：速度逐渐恢复
 			s.vel *= 0.86
 			s.pos = _clamp_world_v(s.pos + s.vel * dt, s.radius)
 			s.near = false
@@ -997,8 +991,8 @@ func _add_riot(amount: float) -> void:
 
 # 险险闪避保安：角色旁飘出 MISS! + 解说刷新 + 加分 + 涨狂热
 func _on_dodge() -> void:
-	score += 20
-	_add_riot(10.0)
+	score += int(TUNE.dodge_score)
+	_add_riot(float(TUNE.dodge_riot))
 	_spawn_popup(p_pos + Vector2(10, -p_radius - 16), "MISS!", Color("#00e5ff"))
 	var lines: Array = GameConfig.DODGE_LINES
 	_say(lines[randi() % lines.size()], Color("#00e5ff"))
@@ -1009,11 +1003,11 @@ func _on_dodge() -> void:
 func _invincible() -> bool:
 	return god_mode or gold_invuln > 0.0
 
-# 醒来后的速度系数：刚醒(groggy=WAKE_DUR) → WAKE_MIN，3 秒后(groggy=0) → 1.0
+# 醒来后的速度系数：刚醒(groggy=wake_duration) → wake_min，恢复期结束(groggy=0) → 1.0
 func _wake_mult(groggy: float) -> float:
 	if groggy <= 0.0:
 		return 1.0
-	return lerpf(WAKE_MIN, 1.0, 1.0 - groggy / WAKE_DUR)
+	return lerpf(float(TUNE.wake_min), 1.0, 1.0 - groggy / float(TUNE.wake_duration))
 
 # 生成一个狂热粉丝：从世界边界外冲向场内一个随机点，抵达后转入乱窜
 func _spawn_riot_fan() -> void:
@@ -1034,7 +1028,7 @@ func _spawn_riot_fan() -> void:
 
 func _trigger_riot() -> void:
 	riot_active = true
-	riot_timer = 480.0
+	riot_timer = float(TUNE.riot_duration)
 	var n: int = 3 + randi() % 3 + int(upgrades.riot_bonus)
 	for i in range(n):
 		_spawn_riot_fan()
@@ -1192,14 +1186,14 @@ func _update_mascots(dt: float) -> void:
 # 直到摩擦把速度耗为 0。可同时存在多颗球。
 # ----------------------------------------------------------------------------
 func _ball_radius() -> float:
-	return BALL_RADIUS * float(upgrades.ball_size)
+	return float(TUNE.ball_base_radius) * float(upgrades.ball_size)
 
 func _spawn_ball(pos: Vector2) -> void:
 	balls.append({"pos": pos, "vel": Vector2.ZERO, "kick_cd": 0.0, "fan": false})
 
 func _update_balls(dt: float) -> void:
 	var br: float = _ball_radius()
-	var kick_speed: float = BALL_KICK * float(upgrades.ball_size)  # 升级后“速度快一倍”
+	var kick_speed: float = float(TUNE.ball_kick_speed) * float(upgrades.ball_size)  # 升级后“速度快一倍”
 	var cy: float = WORLD.y / 2.0
 	var goal_half: float = FH * 0.13 / 2.0   # 与 _draw_field_lines 的球门高度一致
 	for b in balls:
@@ -1212,7 +1206,7 @@ func _update_balls(dt: float) -> void:
 			shake = max(shake, 4.0)
 		if b.vel.length() > BALL_STOP:
 			b.pos += b.vel * dt
-			b.vel *= pow(BALL_FRICTION, dt)
+			b.vel *= pow(float(TUNE.ball_friction), dt)
 			# 左右门线：在球门高度内且向门里走 = 进球；否则撞边线反弹（留在场内）
 			var scored := false
 			if b.pos.x < FX0 + br:
@@ -1233,7 +1227,7 @@ func _update_balls(dt: float) -> void:
 # 足球进门：解说 goooooal + 狂热 +10，球回到中圈重新开球
 func _on_goal(b: Dictionary) -> void:
 	_say("goooooooooal!", Color("#ffd740"))
-	_add_riot(10.0)
+	_add_riot(float(TUNE.goal_riot_gain))
 	shake = max(shake, 10.0)
 	_spawn_confetti(b.pos)
 	b.pos = Vector2(WORLD.x / 2.0, WORLD.y / 2.0)
@@ -1247,7 +1241,7 @@ func _ball_hit_check(b: Dictionary, br: float) -> bool:
 	for s in security:
 		if s.fallen > 0: continue
 		if b.pos.distance_to(s.pos) < br + float(s.radius):
-			s.fallen = FALL_DUR
+			s.fallen = float(TUNE.fall_duration)
 			s.state = "chase"
 			s.vel = b.vel.normalized() * 3.0
 			hit_pos = s.pos; got = true; break
@@ -1255,7 +1249,7 @@ func _ball_hit_check(b: Dictionary, br: float) -> bool:
 		for fp in players:
 			if fp.leaving or fp.fallen > 0: continue
 			if b.pos.distance_to(fp.pos) < br + 12.0:
-				fp.fallen = FALL_DUR
+				fp.fallen = float(TUNE.fall_duration)
 				fp.fleeing = false
 				fp.being_photo = false
 				hit_pos = fp.pos; got = true; break
@@ -1263,7 +1257,7 @@ func _ball_hit_check(b: Dictionary, br: float) -> bool:
 		for m in mascots:
 			if m.state == "idle" or m.fallen > 0: continue
 			if b.pos.distance_to(m.pos) < br + MASCOT_RADIUS:
-				m.fallen = FALL_DUR
+				m.fallen = float(TUNE.fall_duration)
 				hit_pos = m.pos; got = true; break
 	if not got:
 		return false
@@ -1545,7 +1539,7 @@ func _draw_footballers() -> void:
 			if fp.is_star:
 				draw_arc(fp.pos + Vector2(0, -4), 20, 0, TAU, 20, Color("#ffd700"), 2.0)
 			if fp.being_photo:
-				draw_arc(fp.pos + Vector2(0, -4), 25, -PI / 2, -PI / 2 + (fp.progress / 60.0) * TAU, 24, Color("#00e5ff"), 3.0)
+				draw_arc(fp.pos + Vector2(0, -4), 25, -PI / 2, -PI / 2 + (fp.progress / float(TUNE.photo_frames)) * TAU, 24, Color("#00e5ff"), 3.0)
 			continue
 		var bob := _dance_bob(float(fp.phase)) if _win_dancing() else _hop(fp)
 		var frame: String = _dance_frame(float(fp.phase)) if _win_dancing() else fp.anim
@@ -1560,7 +1554,7 @@ func _draw_footballers() -> void:
 			if fp.fleeing or fp.exhausted or fp.stamina < smax - 0.5:
 				_draw_mini_bar(fp.pos + Vector2(0, -(30.0 if fp.is_star else 24.0)), fp.stamina / smax, 34.0 if fp.is_star else 20.0, fp.exhausted)
 		if fp.being_photo:
-			draw_arc(fp.pos + Vector2(0, -4), 25, -PI / 2, -PI / 2 + (fp.progress / 60.0) * TAU, 24, Color("#00e5ff"), 3.0)
+			draw_arc(fp.pos + Vector2(0, -4), 25, -PI / 2, -PI / 2 + (fp.progress / float(TUNE.photo_frames)) * TAU, 24, Color("#00e5ff"), 3.0)
 
 func _draw_mini_bar(pos: Vector2, frac: float, w: float, exhausted: bool) -> void:
 	var h := 4.0
@@ -1997,12 +1991,6 @@ func _build_panels() -> void:
 	goal.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	goal.add_theme_constant_override("outline_size", 6)
 	v.add_child(goal)
-	# 玩法提示
-	var howto := _mk_label(GameConfig.HOW_TO_PLAY, 21, Color("#cfe9ff"))
-	howto.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	howto.custom_minimum_size = Vector2(620, 0)
-	howto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	v.add_child(howto)
 	# 横屏提示（放大加粗，提醒手机玩家务必横屏）
 	var tip := _mk_label("📱 强烈建议横屏游玩！", 30, Color("#ffd24a"))
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2011,6 +1999,12 @@ func _build_panels() -> void:
 	var btn := _menu_button("开始冲场")
 	v.add_child(btn)
 	btn.pressed.connect(_start_game)
+	# 玩法提示贴右侧
+	var howto := _mk_label(GameConfig.HOW_TO_PLAY, 20, Color("#cfe9ff"))
+	howto.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	howto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel_start.add_child(howto)
+	_place(howto, 1, 0.5, 1, 0.5, -344, -110, -16, 110)
 
 	panel_upgrade = _overlay()
 	panel_upgrade.visible = false
@@ -2074,15 +2068,15 @@ func _build_panels() -> void:
 	lbl_over_no = _mk_label("", 22, Color("#ffd700"))
 	lbl_over_no.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ov.add_child(lbl_over_no)
-	# 玩法提示（仅被捕结算页显示，胜利页隐藏）
-	lbl_over_howto = _mk_label(GameConfig.HOW_TO_PLAY, 20, Color("#cfe9ff"))
-	lbl_over_howto.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_over_howto.custom_minimum_size = Vector2(640, 0)
-	lbl_over_howto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	ov.add_child(lbl_over_howto)
 	var rb := _menu_button("再次冲场")
 	ov.add_child(rb)
 	rb.pressed.connect(_start_game)
+	# 玩法提示贴右侧（仅被捕结算页显示，胜利页隐藏）
+	lbl_over_howto = _mk_label(GameConfig.HOW_TO_PLAY, 20, Color("#cfe9ff"))
+	lbl_over_howto.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	lbl_over_howto.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	panel_over.add_child(lbl_over_howto)
+	_place(lbl_over_howto, 1, 0.5, 1, 0.5, -344, -110, -16, 110)
 
 func _overlay() -> Control:
 	var c := ColorRect.new()
@@ -2127,7 +2121,7 @@ func _menu_button(text: String) -> Button:
 func _show_upgrade() -> void:
 	state = St.UPGRADE
 	panel_upgrade.visible = true
-	upgrade_picks = 2   # 一次选两个技能
+	upgrade_picks = int(TUNE.upgrade_picks)   # 一次可选的技能数
 	for c in upgrade_box.get_children():
 		c.queue_free()
 	lbl_upgrade_hint = _mk_label("选择 2 个技能", 18, Color("#cfe9ff"))
@@ -2142,9 +2136,9 @@ func _show_upgrade() -> void:
 		{"label": "场上足球 +1", "key": "ball_count"},
 	]
 	choices.shuffle()
-	# 组装 4 个可选项；5% 概率混入“金牌·全场狂热”稀有卡
+	# 组装 4 个可选项；按概率混入“金牌·全场狂热”稀有卡
 	var shown: Array = []
-	if randf() < 0.05:
+	if randf() < float(TUNE.gold_card_chance):
 		shown.append({"label": "★ 金牌·全场狂热 ★", "key": "gold_card", "gold": true})
 		for i in range(3): shown.append(choices[i])
 	else:
