@@ -2077,7 +2077,7 @@ func _build_panels() -> void:
 	lbl_over_hint = _mk_label("", 22, Color("#9fe0ff"))
 	lbl_over_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	ov.add_child(lbl_over_hint)
-	# 今日最快榜：贴左侧，胜负都显示，内容由 Supabase 异步填充
+	# 本周最快榜：贴左侧，胜负都显示，内容由 Supabase 异步填充
 	lbl_leaderboard = _mk_label("", 16, Color("#ffe08a"))
 	lbl_leaderboard.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	lbl_leaderboard.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -2314,7 +2314,7 @@ func _game_over(by: String = "security") -> void:
 		lbl_over_hint.text = ""
 		trophy_rect.visible = false
 	panel_over.visible = true
-	_report_stats()   # 上报本局时长 +（胜利时）记录排行榜并拉取今日榜
+	_report_stats()   # 上报本局时长 +（胜利时）记录排行榜并拉取本周榜
 
 func crowdRoar_win() -> void:
 	# 胜利时炸一波纸屑 + 屏震
@@ -2370,12 +2370,14 @@ func _fmt_ms(ms: int) -> String:
 	var s: int = int(ms / 1000.0)
 	return "%02d:%02d" % [s / 60, s % 60]
 
-# 今天 00:00（北京时间）对应的 UTC 时间字符串，用于“今日榜”过滤
-func _today_start_iso() -> String:
+# 本周一 00:00（北京时间）对应的 UTC 时间字符串，用于“本周榜”过滤
+func _week_start_iso() -> String:
 	var now: int = int(Time.get_unix_time_from_system())
 	var bj: int = now + 8 * 3600
-	var day_start_utc: int = (bj / 86400) * 86400 - 8 * 3600
-	return Time.get_datetime_string_from_unix_time(day_start_utc)
+	var days: int = bj / 86400              # 距 1970-01-01 的天数（北京时区）
+	var weekday_mon0: int = (days + 3) % 7  # 1970-01-01 是周四；换算成 周一=0
+	var monday_start_utc: int = (days - weekday_mon0) * 86400 - 8 * 3600
+	return Time.get_datetime_string_from_unix_time(monday_start_utc)
 
 func _supabase_headers(write: bool) -> PackedStringArray:
 	var h := PackedStringArray([
@@ -2403,7 +2405,7 @@ func _supabase_post(path: String, body: Dictionary, on_done: Callable = Callable
 func _report_stats() -> void:
 	if lbl_leaderboard != null:
 		lbl_leaderboard.visible = true
-		lbl_leaderboard.text = "今日最快榜\n加载中…"
+		lbl_leaderboard.text = "本周最快榜\n加载中…"
 	if not OS.has_feature("web"):
 		_leaderboard_offline()
 		return
@@ -2417,13 +2419,13 @@ func _report_stats() -> void:
 
 func _leaderboard_offline() -> void:
 	if lbl_leaderboard == null: return
-	lbl_leaderboard.text = "—— 今日最快榜 ——\n⚠ 需要联网才能查看 / 上榜\n（集满 22 张才能进入榜单）"
+	lbl_leaderboard.text = "—— 本周最快榜 ——\n⚠ 需要联网才能查看 / 上榜\n（集满 22 张才能进入榜单）"
 
 func _fetch_leaderboard() -> void:
 	var http := HTTPRequest.new()
 	add_child(http)
 	http.request_completed.connect(_on_leaderboard.bind(http))
-	var url := GameConfig.SUPABASE_URL + "/wins?select=serial,clear_ms&created_at=gte." + _today_start_iso().uri_encode() + "&order=clear_ms.asc&limit=10"
+	var url := GameConfig.SUPABASE_URL + "/wins?select=serial,clear_ms&created_at=gte." + _week_start_iso().uri_encode() + "&order=clear_ms.asc&limit=10"
 	var err := http.request(url, _supabase_headers(false), HTTPClient.METHOD_GET)
 	if err != OK:
 		http.queue_free()
@@ -2436,7 +2438,7 @@ func _on_leaderboard(_result: int, code: int, _headers: PackedStringArray, body:
 		_leaderboard_offline()
 		return
 	var data: Variant = JSON.parse_string(body.get_string_from_utf8())
-	var lines := PackedStringArray(["—— 今日最快榜 Top10 ——"])
+	var lines := PackedStringArray(["—— 本周最快榜 Top10 ——"])
 	var my_serial := _win_serial_no()
 	var in_top := false
 	if typeof(data) == TYPE_ARRAY and not (data as Array).is_empty():
@@ -2448,7 +2450,7 @@ func _on_leaderboard(_result: int, code: int, _headers: PackedStringArray, body:
 			if mine: in_top = true
 			lines.append("%d. %s  %s%s" % [rank, serial, _fmt_ms(int(row.get("clear_ms", 0))), ("  ←你" if mine else "")])
 	else:
-		lines.append("（今日暂无记录，集满即榜一！）")
+		lines.append("（本周暂无记录，集满即榜一！）")
 	var base_text := "\n".join(lines)
 	if not won:
 		lbl_leaderboard.text = base_text + "\n———\n集满 22 张才能上榜单"
@@ -2458,12 +2460,12 @@ func _on_leaderboard(_result: int, code: int, _headers: PackedStringArray, body:
 		lbl_leaderboard.text = base_text + "\n———\n你的用时 %s · 名次计算中…" % _fmt_ms(win_clear_ms)
 		_fetch_my_rank(win_clear_ms, base_text)
 
-# 粗略名次：统计“今日比你更快”的人数（最多取 500，名次 = 人数 + 1）
+# 粗略名次：统计“本周比你更快”的人数（最多取 500，名次 = 人数 + 1）
 func _fetch_my_rank(my_ms: int, base_text: String) -> void:
 	var http := HTTPRequest.new()
 	add_child(http)
 	http.request_completed.connect(_on_my_rank.bind(http, base_text))
-	var url := GameConfig.SUPABASE_URL + "/wins?select=clear_ms&created_at=gte." + _today_start_iso().uri_encode() + "&clear_ms=lt." + str(my_ms) + "&limit=500"
+	var url := GameConfig.SUPABASE_URL + "/wins?select=clear_ms&created_at=gte." + _week_start_iso().uri_encode() + "&clear_ms=lt." + str(my_ms) + "&limit=500"
 	var err := http.request(url, _supabase_headers(false), HTTPClient.METHOD_GET)
 	if err != OK:
 		http.queue_free()
