@@ -125,10 +125,10 @@ static func default_tune() -> Dictionary:
 		"camera_zoom": 1.3,             # 相机缩放：值越大画面越大（越近）；0.72 偏远，1.0 为 1:1
 
 		# —— 速度 ——
-		"player_base_speed": 2.7,       # 主角基础移速（↑更好逃）
-		"sprint_mult": 1.9,             # 按 Shift 冲刺时的速度倍率
-		"sec_ratio": 0.68,              # 普通保安速度 = 主角基础速度 × 此比例（↓更容易甩开）
-		"sec_ratio_elite": 0.88,        # 精英保安速度比例
+		"player_base_speed": 2.6,       # 主角基础移速
+		"sprint_mult": 1.8,             # 按 Shift 冲刺时的速度倍率
+		"sec_ratio": 0.75,              # 普通保安速度 = 主角基础速度 × 此比例
+		"sec_ratio_elite": 0.90,        # 精英保安速度比例
 		"star_speed": 2.5,              # 球星(10/7号)逃跑速度
 		"common_speed": 1.9,            # 普通球员速度
 
@@ -137,12 +137,12 @@ static func default_tune() -> Dictionary:
 		"common_stamina": 55.0,         # 普通球员体力
 
 		# —— 保安数量/刷新（核心难度）——
-		"base_security": 4,             # 初始保安数量
-		"max_security": 42,             # 场上保安数量上限（↓最直接的降难度手段）
+		"base_security": 5,             # 初始保安数量
+		"max_security": 66,             # 场上保安数量上限（↓最直接的降难度手段）
 		"sec_spawn_interval_mult": 3,   # 保安生成间隔倍率（越大刷得越慢）
-		"sec_grow_time": 18.0,          # 每存活 N 帧目标保安 +1（越大刷得越慢）
-		"sec_grow_score": 1500.0,       # 每得 N 分目标保安 +1
-		"sec_grow_photo": 8.0,          # 每合影 N 人目标保安 +1
+		"sec_grow_time": 15.0,          # 每存活 N 帧目标保安 +1（越大刷得越慢）
+		"sec_grow_score": 1000.0,       # 每得 N 分目标保安 +1
+		"sec_grow_photo": 6.0,          # 每合影 N 人目标保安 +1
 		"sec_separation_radius": 70.0,  # 保安互斥半径（避免重叠走同一条路）
 		"sec_separation_force": 0.9,    # 互斥强度
 
@@ -156,7 +156,7 @@ static func default_tune() -> Dictionary:
 		"mascot_speed_mult": 0.7,       # 全局倍率（1.0 = 用各自 5/6/7 倍；↓更容易躲）
 
 		# —— 拍照（合影）——
-		"photo_frames": 50.0,           # 合影成功需要的累计帧数（↓拍得更快，更好通关）
+		"photo_frames": 60.0,           # 合影成功需要的累计帧数（↓拍得更快，更好通关）
 		"photo_base_range": 50.0,       # 合影判定基础半径（再乘升级 photo_radius）
 
 		# —— 计分 ——
