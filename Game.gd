@@ -2075,14 +2075,11 @@ func _build_panels() -> void:
 	var rb := _menu_button("再次冲场")
 	ov.add_child(rb)
 	rb.pressed.connect(_start_game)
-	# 玩家编号：刻在奖杯底座的金色铭牌上（深色字模拟雕刻），位置对准右侧奖杯
-	lbl_over_no = _mk_label("", 13, Color("#3d2a08"))
+	# 玩家编号：放在右侧奖杯正下方
+	lbl_over_no = _mk_label("", 20, Color("#ffd700"))
 	lbl_over_no.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_over_no.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl_over_no.add_theme_color_override("font_outline_color", Color(1.0, 0.86, 0.4, 0.6))
-	lbl_over_no.add_theme_constant_override("outline_size", 2)
 	panel_over.add_child(lbl_over_no)
-	_place(lbl_over_no, 1, 0.5, 1, 0.5, -293, 118, -97, 156)
+	_place(lbl_over_no, 1, 0.5, 1, 0.5, -320, 176, -70, 214)
 	# 玩法提示贴右侧（仅被捕结算页显示，胜利页隐藏）
 	lbl_over_howto = _mk_label(GameConfig.HOW_TO_PLAY, 20, Color("#cfe9ff"))
 	lbl_over_howto.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
