@@ -183,6 +183,9 @@ var qr_rect: TextureRect
 var trophy_rect: TextureRect
 var win_glow_rect: TextureRect
 var touch_root: Control
+var orient_layer: CanvasLayer    # 竖屏“请横屏”提示
+var lbl_orient: Label
+var is_wechat := false
 var won := false
 var win_confetti_timer := 0.0
 var upgrade_box: VBoxContainer
@@ -202,10 +205,41 @@ func _ready() -> void:
 	_setup_environment()
 	_build_ui()
 	_setup_audio()
+	_detect_wechat()
+	_build_orientation_warning()
 	god_mode = GameConfig.DEBUG.god_mode
 	set_process(true)
 	if GameConfig.DEBUG.start_immediately:
 		_start_game()
+
+func _detect_wechat() -> void:
+	if OS.has_feature("web"):
+		var ua: String = str(JavaScriptBridge.eval("navigator.userAgent || ''", true))
+		is_wechat = ua.findn("MicroMessenger") != -1
+
+# 竖屏时盖一层“请横屏”提示（微信内额外提示用浏览器打开）
+func _build_orientation_warning() -> void:
+	orient_layer = CanvasLayer.new()
+	orient_layer.layer = 128   # 盖在所有 UI 之上
+	add_child(orient_layer)
+	var bg := ColorRect.new()
+	bg.color = Color("#0b1a12")
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
+	orient_layer.add_child(bg)
+	lbl_orient = Label.new()
+	lbl_orient.text = GameConfig.ORIENT_HINT_WECHAT if is_wechat else GameConfig.ORIENT_HINT
+	lbl_orient.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lbl_orient.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_orient.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl_orient.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lbl_orient.add_theme_font_size_override("font_size", 30)
+	lbl_orient.add_theme_color_override("font_color", Color("#ffd24a"))
+	lbl_orient.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
+	lbl_orient.add_theme_constant_override("outline_size", 5)
+	if font: lbl_orient.add_theme_font_override("font", font)
+	orient_layer.add_child(lbl_orient)
+	orient_layer.visible = false
 
 # 加载内置的像素中文字体（Zpix）。直接读原始字节构建 FontFile，绕开 Godot 导入系统，
 # 确保打包进 web 构建（cjkfont.dat 由 export_presets 的 include_filter 强制包含）。
@@ -485,6 +519,10 @@ func _play_shutter() -> void:
 # ============================================================================
 func _process(delta: float) -> void:
 	var dt: float = min(2.0, delta * 60.0)
+	# 竖屏检测：盖上“请横屏”提示（留 5% 容差，避免近方形抖动）
+	if orient_layer != null:
+		var vp := get_viewport_rect().size
+		orient_layer.visible = vp.y > vp.x * 1.05
 	if state == St.PLAY:
 		elapsed += dt
 		# 存活计分：每活满 1 秒(60 帧) +10 分
